@@ -1049,14 +1049,24 @@ function initThree() {
   // Это надёжнее чем texture.offset для scene.background.
   const _skyLoader = new THREE.TextureLoader();
   _skyLoader.load('assets/sky/sky_05_2k.png', (skyTex) => {
-    skyTex.mapping = THREE.EquirectangularReflectionMapping;
-    skyTex.wrapS = THREE.RepeatWrapping;
-    skyTex.wrapT = THREE.RepeatWrapping;
-    // offset.y = +0.30 → UV сдвигается вверх → мы видим нижнюю часть текстуры
-    // НО нам нужны облака (верх текстуры) → offset.y отрицательный
-    // -0.38 = сильно опускаем горизонт, облака заполняют верхние 2/3 экрана
+    skyTex.wrapS = skyTex.wrapT = THREE.RepeatWrapping;
     skyTex.offset.set(0, -0.65);
-    scene.background = skyTex;
+    skyTex.needsUpdate = true;
+    // Скайдом: сфера radius=30 — купол 60x60 как вода и отражение
+    const skyGeo = new THREE.SphereGeometry(30, 32, 16);
+    const skyMat = new THREE.MeshBasicMaterial({
+      map: skyTex,
+      side: THREE.BackSide, // текстура внутри сферы
+    });
+    const skyDome = new THREE.Mesh(skyGeo, skyMat);
+    // Центрируем над картой
+    skyDome.position.set(
+      (GRID_W - 1) / 2 * TILE_SIZE,
+      0,
+      (GRID_H - 1) / 2 * TILE_SIZE
+    );
+    scene.add(skyDome);
+    scene.background = null; // убираем плоский фон
     renderer.setClearColor(0x87ceeb, 1);
   });
   // ═══════════════════════════════════════════
@@ -1107,11 +1117,11 @@ function initThree() {
       opacity: 0.55,
       depthWrite: false,
     });
-    const oceanMesh = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), oceanMat);
+    const oceanMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), oceanMat);
     oceanMesh.rotation.x = -Math.PI / 2;
     oceanMesh.position.set(
       (GRID_W - 1) / 2 * TILE_SIZE,
-      -0.25, // совпадает с MIRROR_Y
+      -0.02, // впритык под островом
       (GRID_H - 1) / 2 * TILE_SIZE
     );
     oceanMesh.renderOrder = 10;
@@ -2270,7 +2280,7 @@ function buildReflection() {
   _reflGroup = new THREE.Group();
 
   // Уровень зеркала (плоскость отражения)
-  const MIRROR_Y = -0.25;
+  const MIRROR_Y = -0.01; // впритык к острову
 
   tileObjects.forEach(obj => {
     const clone = obj.clone();
@@ -2279,9 +2289,9 @@ function buildReflection() {
         const mats = Array.isArray(child.material) ? child.material : [child.material];
         child.material = mats.map(m => {
           const nm = m.clone();
-          nm.transparent = true;
-          nm.opacity = 0.30;
-          nm.depthWrite = false;
+          nm.transparent = false;
+          nm.opacity = 1.0;
+          nm.depthWrite = true;
           nm.side = THREE.FrontSide;
           return nm;
         });
