@@ -1029,7 +1029,7 @@ let enemyId = 0;
 function initThree() {
   const canvas = document.getElementById('canvas');
   
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, stencil: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -1098,6 +1098,71 @@ function initThree() {
   scene.add(hemiLight);
   
   window.addEventListener('resize', onResize);
+
+  // ══ ВОДА (stencil plane) ══════════════════════════════════════════════
+  // Плоскость воды рисует маску в stencil-буфере (colorWrite:false)
+  // Поверх — второй меш с полупрозрачным материалом для цвета воды.
+  {
+    const waterGeo = new THREE.PlaneGeometry(120, 120);
+    waterGeo.rotateX(-Math.PI / 2);
+
+    // Pass 1: записываем stencil = 1 там где вода (без вывода цвета)
+    const stencilMat = new THREE.MeshBasicMaterial({
+      colorWrite: false,
+      stencilWrite: true,
+      stencilFunc: THREE.AlwaysStencilFunc,
+      stencilZPass: THREE.ReplaceStencilOp,
+      stencilRef: 1,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    const stencilMesh = new THREE.Mesh(waterGeo, stencilMat);
+    stencilMesh.position.set((GRID_W-1)/2, WATER_Y, (GRID_H-1)/2);
+    stencilMesh.renderOrder = 0;
+    scene.add(stencilMesh);
+
+    // Pass 2: красивая полупрозрачная поверхность воды поверх отражения
+    const waterMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime:  { value: 0 },
+        uColor: { value: new THREE.Color(0x50c8f0) },
+        uColor2:{ value: new THREE.Color(0x88e4ff) },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform vec3 uColor2;
+        varying vec2 vUv;
+        float wave(vec2 p, float t) {
+          return sin(p.x * 8.0 + t * 1.2) * sin(p.y * 6.0 + t * 0.8) * 0.5 + 0.5;
+        }
+        void main() {
+          float w1 = wave(vUv, uTime);
+          float w2 = wave(vUv * 2.1 + 0.3, uTime * 1.3);
+          vec3 col = mix(uColor, uColor2, (w1 + w2) * 0.5);
+          float alpha = 0.30 + w1 * 0.08;
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    // Обновляем uTime каждый кадр
+    window._waterShaderMat = waterMat;
+    _waterMesh = new THREE.Mesh(waterGeo.clone(), waterMat);
+    _waterMesh.position.set((GRID_W-1)/2, WATER_Y + 0.005, (GRID_H-1)/2);
+    _waterMesh.renderOrder = 3;
+    scene.add(_waterMesh);
+  }
+  // ════════════════════════════════════════════════════════════════════════
 
   // Save all persistent objects (lights + floor) so clearScene can restore them
   _persistentObjects = [...scene.children];
@@ -1173,6 +1238,12 @@ const ROCK_POOL=['tile_rock','tile_crystal','tile_rock'];
 let _sceneObjects = [];
 let _persistentObjects = []; // filled at end of initThree
 
+// ══ ОТРАЖЕНИЕ ══
+let _reflectionGroup = null;   // клон карты перевёрнутый по Y
+let _waterMesh = null;         // плоскость воды с stencil + прозрачность
+const WATER_Y = -0.35;         // глубина зеркала (чуть ниже тайлов)
+const REFLECT_Y = WATER_Y * 2; // Y перевёрнутой копии
+
 function addToScene(obj) {
   scene.add(obj);
   _sceneObjects.push(obj);
@@ -1188,7 +1259,73 @@ function clearScene() {
   edHoverMesh = null;
   rangeRingMesh = null;
   hoverRangeRing = null;
+  // Сбрасываем отражение — оно пересоздаётся в buildMap
+  _reflectionGroup = null;
 }
+
+// ══ BUILD REFLECTION — зеркальная копия всей карты под водой ═══════════════
+function buildReflection() {
+  // Убираем старое отражение
+  if (_reflectionGroup) {
+    scene.remove(_reflectionGroup);
+    _reflectionGroup = null;
+  }
+
+  const grp = new THREE.Group();
+
+  // Копируем каждый объект из _sceneObjects (тайлы + декор)
+  // и зеркалим по Y относительно WATER_Y
+  for (const obj of _sceneObjects) {
+    if (!obj.isMesh && !obj.isGroup && obj.type !== 'Group') continue;
+    const clone = obj.clone(true);
+
+    // Позиция: отражаем Y
+    clone.position.copy(obj.position);
+    clone.position.y = 2 * WATER_Y - obj.position.y;
+
+    // Поворот: инвертируем X и Z вращение (зеркало по Y)
+    clone.rotation.copy(obj.rotation);
+    clone.rotation.x = -obj.rotation.x;
+    clone.rotation.z = -obj.rotation.z;
+
+    // Масштаб: инвертируем Y для зеркала
+    clone.scale.copy(obj.scale);
+    clone.scale.y = -obj.scale.y;
+
+    // Материалы: полупрозрачные + синеватый тинт
+    clone.traverse(m => {
+      if (!m.isMesh) return;
+      m.castShadow = false;
+      m.receiveShadow = false;
+      // stencil: рисуем только там где stencil == 1 (вода)
+      m.material = m.material.clone();
+      m.material.transparent = true;
+      m.material.opacity = 0.45;
+      m.material.depthWrite = false;
+      // Синеватый тинт — смешиваем цвет с голубым
+      if (m.material.color) {
+        const c = m.material.color;
+        c.r = c.r * 0.55 + 0.3;
+        c.g = c.g * 0.6 + 0.35;
+        c.b = c.b * 0.55 + 0.55;
+      }
+      m.material.stencilWrite = false;
+      m.material.stencilFunc = THREE.EqualStencilFunc;
+      m.material.stencilRef = 1;
+      m.material.stencilFail = THREE.KeepStencilOp;
+      m.material.stencilZFail = THREE.KeepStencilOp;
+      m.material.stencilZPass = THREE.KeepStencilOp;
+      m.material.side = THREE.FrontSide;
+    });
+
+    clone.renderOrder = 2; // между stencil(0) и водой(3)
+    grp.add(clone);
+  }
+
+  _reflectionGroup = grp;
+  scene.add(grp);
+}
+// ════════════════════════════════════════════════════════════════════════════
 
 function buildMap(g, customCellData) {
   clearScene();
@@ -1276,6 +1413,9 @@ function buildMap(g, customCellData) {
 
   camTarget.set((GRID_W-1)/2*TILE_SIZE,0,(GRID_H-1)/2*TILE_SIZE);
   updateCamera();
+
+  // Строим отражение после того как карта построена
+  buildReflection();
 }
 
 // ============================================================
@@ -2289,6 +2429,16 @@ function gameLoop(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1) * gameSpeed;
   lastTime = ts;
 
+  // ── Анимация воды: обновляем uTime шейдера ──
+  if (window._waterShaderMat) {
+    window._waterShaderMat.uniforms.uTime.value = ts * 0.001;
+  }
+  // ── Анимация отражения: лёгкое покачивание ──
+  if (_reflectionGroup) {
+    const waveY = Math.sin(ts * 0.0008) * 0.018;
+    _reflectionGroup.position.y = waveY;
+    _reflectionGroup.position.x = Math.sin(ts * 0.0005) * 0.012;
+  }
 
   if (gameState !== 'playing') {
     renderer.render(scene, camera);
