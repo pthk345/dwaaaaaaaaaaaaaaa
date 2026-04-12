@@ -1037,7 +1037,8 @@ function initThree() {
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.LinearToneMapping;
   renderer.toneMappingExposure = 1.0;
-  renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
+  renderer.setClearColor(0x6baed6, 1);
+  renderer.localClippingEnabled = true; // нужно для clippingPlanes в материалах
   
   scene = new THREE.Scene();
   // Небо загружается ниже через TextureLoader
@@ -2267,8 +2268,16 @@ let _reflGroup = null;
 function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
 
-  _reflGroup = new THREE.Group();
   const MIRROR_Y = -0.25;
+
+  // Clipping plane: отрезаем всё что ниже MIRROR_Y в мировых координатах.
+  // После scale.y=-1 + position.y=2*MIRROR_Y боковые грани тайлов
+  // уходят вниз — clipping plane их отсекает, оставляя только верхние грани.
+  const clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -MIRROR_Y);
+  renderer.clippingPlanes = [];      // сброс глобальных
+  renderer.localClippingEnabled = true; // нужно для per-material clipping
+
+  _reflGroup = new THREE.Group();
 
   tileObjects.forEach(obj => {
     const clone = obj.clone();
@@ -2277,11 +2286,13 @@ function buildReflection() {
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       child.material = mats.map(m => {
         const nm = m.clone();
-        nm.transparent = true;
-        nm.depthWrite  = false;
-        nm.depthTest   = false; // игнорируем глубину — нет внутренних граней
-        nm.opacity     = 0.18;
-        nm.side        = THREE.FrontSide;
+        nm.transparent  = true;
+        nm.opacity      = 0.30;
+        nm.depthWrite   = false;
+        nm.depthTest    = true;   // оригинал остаётся непрозрачным — depthTest=true здесь не мешает
+        nm.side         = THREE.FrontSide;
+        nm.clippingPlanes = [clipPlane]; // отрезаем боковые грани
+        nm.clipShadows  = false;
         return nm;
       });
       if (child.material.length === 1) child.material = child.material[0];
@@ -2291,7 +2302,6 @@ function buildReflection() {
 
   _reflGroup.scale.set(1, -1, 1);
   _reflGroup.position.y = 2 * MIRROR_Y;
-  _reflGroup.renderOrder = 1; // рисуем после основной сцены
   scene.add(_reflGroup);
 }
 // ────────────────────────────────────────────────────────────────
