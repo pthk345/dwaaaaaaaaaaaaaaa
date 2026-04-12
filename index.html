@@ -1037,8 +1037,7 @@ function initThree() {
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.LinearToneMapping;
   renderer.toneMappingExposure = 1.0;
-  renderer.setClearColor(0x6baed6, 1);
-  renderer.localClippingEnabled = true; // нужно для clippingPlanes в материалах
+  renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
   
   scene = new THREE.Scene();
   // Небо загружается ниже через TextureLoader
@@ -2268,40 +2267,41 @@ let _reflGroup = null;
 function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
 
-  const MIRROR_Y = -0.25;
-
-  // Clipping plane: отрезаем всё что ниже MIRROR_Y в мировых координатах.
-  // После scale.y=-1 + position.y=2*MIRROR_Y боковые грани тайлов
-  // уходят вниз — clipping plane их отсекает, оставляя только верхние грани.
-  const clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -MIRROR_Y);
-  renderer.clippingPlanes = [];      // сброс глобальных
-  renderer.localClippingEnabled = true; // нужно для per-material clipping
-
   _reflGroup = new THREE.Group();
+
+  // Уровень зеркала (плоскость отражения)
+  const MIRROR_Y = -0.25;
 
   tileObjects.forEach(obj => {
     const clone = obj.clone();
     clone.traverse(child => {
-      if (!child.isMesh) return;
-      const mats = Array.isArray(child.material) ? child.material : [child.material];
-      child.material = mats.map(m => {
-        const nm = m.clone();
-        nm.transparent  = true;
-        nm.opacity      = 0.30;
-        nm.depthWrite   = false;
-        nm.depthTest    = true;   // оригинал остаётся непрозрачным — depthTest=true здесь не мешает
-        nm.side         = THREE.FrontSide;
-        nm.clippingPlanes = [clipPlane]; // отрезаем боковые грани
-        nm.clipShadows  = false;
-        return nm;
-      });
-      if (child.material.length === 1) child.material = child.material[0];
+      if (child.isMesh && child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        child.material = mats.map(m => {
+          const nm = m.clone();
+          nm.transparent = true;
+          nm.opacity = 0.30;
+          nm.depthWrite = false;
+          // scale.y=-1 инвертирует winding order → оригинальные внешние грани
+          // теперь back faces → используем BackSide чтобы видеть только их
+          nm.side = THREE.BackSide;
+          return nm;
+        });
+        if (child.material.length === 1) child.material = child.material[0];
+      }
     });
     _reflGroup.add(clone);
   });
 
+  // Правильная математика зеркала:
+  // Оригинал: тайлы на y ≈ 0..0.5
+  // Зеркальная плоскость: y = MIRROR_Y
+  // Отражение тайла на y=0: находится на y = 2*MIRROR_Y - 0 = -0.5
+  // scale.y = -1 переворачивает Y внутри группы
+  // position.y = 2*MIRROR_Y смещает так чтобы y=0 оказался на 2*MIRROR_Y
   _reflGroup.scale.set(1, -1, 1);
-  _reflGroup.position.y = 2 * MIRROR_Y;
+  _reflGroup.position.y = 2 * MIRROR_Y; // = -0.5 — отражение ниже карты
+
   scene.add(_reflGroup);
 }
 // ────────────────────────────────────────────────────────────────
