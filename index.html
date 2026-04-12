@@ -988,9 +988,7 @@ const TOTAL_WAVES = 20;
 let THREE_loaded = false;
 let assets = null;
 let renderer, scene, camera, raycaster;
-let _reflectRT = null;   // WebGLRenderTarget для отражения
-let _reflCamera = null;  // Виртуальная камера снизу
-let _reflPlane = null;   // Плоскость отражения (меш)
+let _reflGroup = null;  // Клон карты — отражение
 let gameState = 'menu';
 let animFrameId = null;
 
@@ -1069,34 +1067,7 @@ function initThree() {
   camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
   updateCamera();
 
-  // ══ RENDER TARGET REFLECTION ═══════════════════════════════════
-  const rtW = Math.max(256, Math.floor(window.innerWidth  / 2));
-  const rtH = Math.max(256, Math.floor(window.innerHeight / 2));
-  _reflectRT = new THREE.WebGLRenderTarget(rtW, rtH, {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    format: THREE.RGBAFormat,
-  });
-  _reflCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-  _reflCamera.matrixAutoUpdate = false;
 
-  // Плоскость отражения — натянем RT-текстуру прямо на воду
-  const _rpGeo = new THREE.PlaneGeometry(120, 120);
-  _rpGeo.rotateX(-Math.PI / 2);
-  _reflPlane = new THREE.Mesh(_rpGeo, new THREE.MeshBasicMaterial({
-    map: _reflectRT.texture,
-    transparent: true,
-    opacity: 0.55,
-    depthWrite: false,
-  }));
-  _reflPlane.position.set(
-    (GRID_W - 1) / 2 * TILE_SIZE,
-    -0.24,   // чуть выше оригинального MIRROR_Y=-0.25 чтобы рисоваться поверх
-    (GRID_H - 1) / 2 * TILE_SIZE
-  );
-  _reflPlane.renderOrder = 8; // ниже океана (10)
-  scene.add(_reflPlane);
-  // ═══════════════════════════════════════════════════════════════
   
   raycaster = new THREE.Raycaster();
 
@@ -1172,16 +1143,7 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  if (_reflCamera) {
-    _reflCamera.aspect = camera.aspect;
-    _reflCamera.updateProjectionMatrix();
-  }
-  if (_reflectRT) {
-    _reflectRT.setSize(
-      Math.max(256, Math.floor(window.innerWidth  / 2)),
-      Math.max(256, Math.floor(window.innerHeight / 2))
-    );
-  }
+
 }
 
 // ============================================================
@@ -2304,46 +2266,62 @@ function spawnDeathParticles(pos) {
 // ── ОТРАЖЕНИЕ ──────────────────────────────────────────────────
 
 // ── ОТРАЖЕНИЕ: перевёрнутая копия тайлов карты ─────────────────
-// buildReflection: теперь просто обновляет RT в gameLoop, вызов не нужен
-function buildReflection() { /* no-op: RT обновляется каждый кадр */ }
-
-// ── RENDER REFLECTION INTO RT ─────────────────────────────────────────────
-// Матрица отражения по горизонтальной плоскости y = MIRROR_Y:
-//   [1  0  0       0]
-//   [0 -1  0  2*MIRROR_Y]
-//   [0  0  1       0]
-//   [0  0  0       1]
-// Применяем к camera.matrixWorld → получаем matrixWorld зеркальной камеры.
+// ── ОТРАЖЕНИЕ: клон карты (опак) + синий оверлей 30% ────────────────────────
 const _MIRROR_Y = -0.25;
-const _reflMat4 = new THREE.Matrix4().set(
-  1,  0,  0,  0,
-  0, -1,  0,  2 * _MIRROR_Y,
-  0,  0,  1,  0,
-  0,  0,  0,  1
-);
 
-function renderReflectionRT() {
-  if (!_reflectRT || !_reflCamera || !_reflPlane) return;
+function buildReflection() {
+  if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
 
-  // Обновляем матрицу отражённой камеры из текущей камеры
-  camera.updateMatrixWorld(true);
-  _reflCamera.projectionMatrix.copy(camera.projectionMatrix);
-  _reflCamera.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
-  _reflCamera.matrixWorld.copy(_reflMat4).multiply(camera.matrixWorld);
-  _reflCamera.matrixWorldInverse.copy(_reflCamera.matrixWorld).invert();
+  const grp = new THREE.Group();
 
-  // Скрываем плоскость отражения и океан во время рендера RT
-  // (иначе они попадут в сам рендер и создадут рекурсию/артефакты)
-  _reflPlane.visible = false;
-  if (window._oceanMesh) window._oceanMesh.visible = false;
+  tileObjects.forEach(obj => {
+    const clone = obj.clone();
+    clone.traverse(child => {
+      if (!child.isMesh || !child.material) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      child.material = mats.map(m => {
+        const nm = m.clone();
+        // Полностью непрозрачный — никаких внутренних граней сквозь него не видно
+        nm.transparent = false;
+        nm.opacity = 1.0;
+        nm.depthWrite = true;
+        nm.side = THREE.BackSide; // scale.y=-1 инвертирует winding
+        return nm;
+      });
+      if (child.material.length === 1) child.material = child.material[0];
+    });
+    grp.add(clone);
+  });
 
-  renderer.setRenderTarget(_reflectRT);
-  renderer.clear();
-  renderer.render(scene, _reflCamera);
-  renderer.setRenderTarget(null);
+  // Зеркало по Y=MIRROR_Y
+  grp.scale.set(1, -1, 1);
+  grp.position.y = 2 * _MIRROR_Y;
+  grp.renderOrder = 1;
 
-  _reflPlane.visible = true;
-  if (window._oceanMesh) window._oceanMesh.visible = true;
+  _reflGroup = grp;
+  scene.add(grp);
+
+  // Синий оверлей 30% поверх отражения — создаёт эффект воды
+  // Пересоздаём только если ещё нет
+  if (!window._blueOverlay) {
+    const geo = new THREE.PlaneGeometry(120, 120);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x4ab8e8,
+      transparent: true,
+      opacity: 0.30,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(
+      (GRID_W - 1) / 2 * TILE_SIZE,
+      _MIRROR_Y + 0.01,
+      (GRID_H - 1) / 2 * TILE_SIZE
+    );
+    mesh.renderOrder = 5;
+    scene.add(mesh);
+    window._blueOverlay = mesh;
+  }
 }
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -2369,9 +2347,6 @@ function gameLoop(ts) {
     );
   }
 
-
-  // Рендерим отражение в RT до основного рендера каждый кадр
-  renderReflectionRT();
 
   if (gameState !== 'playing') {
     renderer.render(scene, camera);
