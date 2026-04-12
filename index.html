@@ -1072,7 +1072,7 @@ function initThree() {
     const oceanMesh = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), oceanMat);
     oceanMesh.rotation.x = -Math.PI / 2;
     oceanMesh.position.set(
-      (GRID_W - 1) / 2 * TILE_SIZE, 1, (GRID_H - 1) / 2 * TILE_SIZE
+      (GRID_W - 1) / 2 * TILE_SIZE, 3, (GRID_H - 1) / 2 * TILE_SIZE
     );
     scene.add(oceanMesh);
     window._oceanMesh = oceanMesh;
