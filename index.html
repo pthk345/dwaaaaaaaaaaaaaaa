@@ -1044,13 +1044,30 @@ function initThree() {
   scene.background = new THREE.Color(0x87ceeb); // временный голубой
 
   // ══ НЕБО ══════════════════════════════════
-  new THREE.TextureLoader().load('assets/sky/sky_05_2k.png', (skyTex) => {
-    skyTex.mapping = THREE.EquirectangularReflectionMapping;
-    skyTex.wrapS = THREE.RepeatWrapping;
-    skyTex.wrapT = THREE.RepeatWrapping;
+  // Equirectangular панорама. Облака в верхней четверти текстуры.
+  // Используем SphereGeometry как скайдом — даёт полный контроль над позицией.
+  // Это надёжнее чем texture.offset для scene.background.
+  const _skyLoader = new THREE.TextureLoader();
+  _skyLoader.load('assets/sky/sky_05_2k.png', (skyTex) => {
+    skyTex.wrapS = skyTex.wrapT = THREE.RepeatWrapping;
     skyTex.offset.set(0, -0.65);
     skyTex.needsUpdate = true;
-    scene.background = skyTex;
+    // Скайдом: сфера radius=30 — купол 60x60 как вода и отражение
+    const skyGeo = new THREE.SphereGeometry(30, 32, 16);
+    const skyMat = new THREE.MeshBasicMaterial({
+      map: skyTex,
+      side: THREE.BackSide, // текстура внутри сферы
+    });
+    const skyDome = new THREE.Mesh(skyGeo, skyMat);
+    // Центрируем над картой
+    skyDome.position.set(
+      (GRID_W - 1) / 2 * TILE_SIZE,
+      0,
+      (GRID_H - 1) / 2 * TILE_SIZE
+    );
+    scene.add(skyDome);
+    scene.background = null; // убираем плоский фон
+    renderer.setClearColor(0x87ceeb, 1);
   });
   // ═══════════════════════════════════════════
 
