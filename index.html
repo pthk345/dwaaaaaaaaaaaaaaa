@@ -2268,38 +2268,30 @@ function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
 
   _reflGroup = new THREE.Group();
-
-  // Уровень зеркала (плоскость отражения)
   const MIRROR_Y = -0.25;
 
   tileObjects.forEach(obj => {
     const clone = obj.clone();
     clone.traverse(child => {
-      if (child.isMesh && child.material) {
-        const mats = Array.isArray(child.material) ? child.material : [child.material];
-        child.material = mats.map(m => {
-          const nm = m.clone();
-          nm.transparent = true;
-          nm.opacity = 0.30;
-          nm.depthWrite = false;
-          nm.side = THREE.FrontSide;
-          return nm;
-        });
-        if (child.material.length === 1) child.material = child.material[0];
-      }
+      if (!child.isMesh) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      child.material = mats.map(m => {
+        const nm = m.clone();
+        nm.transparent = true;
+        nm.depthWrite  = false;
+        nm.depthTest   = false; // игнорируем глубину — нет внутренних граней
+        nm.opacity     = 0.18;
+        nm.side        = THREE.FrontSide;
+        return nm;
+      });
+      if (child.material.length === 1) child.material = child.material[0];
     });
     _reflGroup.add(clone);
   });
 
-  // Правильная математика зеркала:
-  // Оригинал: тайлы на y ≈ 0..0.5
-  // Зеркальная плоскость: y = MIRROR_Y
-  // Отражение тайла на y=0: находится на y = 2*MIRROR_Y - 0 = -0.5
-  // scale.y = -1 переворачивает Y внутри группы
-  // position.y = 2*MIRROR_Y смещает так чтобы y=0 оказался на 2*MIRROR_Y
   _reflGroup.scale.set(1, -1, 1);
-  _reflGroup.position.y = 2 * MIRROR_Y; // = -0.5 — отражение ниже карты
-
+  _reflGroup.position.y = 2 * MIRROR_Y;
+  _reflGroup.renderOrder = 1; // рисуем после основной сцены
   scene.add(_reflGroup);
 }
 // ────────────────────────────────────────────────────────────────
