@@ -2262,14 +2262,17 @@ function gameLoop(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1) * gameSpeed;
   lastTime = ts;
 
-  // Анимация океана — вращение + качание по Y (не заезжает на карту)
+  // Анимация океана — вращение + наклон без заезда на остров
   if (window._oceanMesh) {
     window._oceanT = (window._oceanT || 0) + 0.004;
     const t = window._oceanT;
     window._oceanMesh.rotation.z += 0.0002;
-    // Качание вверх-вниз по Y — как вода поднимается и опускается
-    // Амплитуда 0.12 — достаточно заметно, но не заезжает на карту (та на y=0)
-    window._oceanMesh.position.y = -0.05 + Math.sin(t * 0.9) * 0.12;
+    // Наклон: амплитуда 0.015 rad, плоскость 80 units
+    // Максимальный подъём края: sin(0.015)*40 = 0.6 units
+    // Плоскость на y=-0.8 → максимальный край = -0.8 + 0.6 = -0.2 → не достигает y=0 карты
+    window._oceanMesh.rotation.x = -Math.PI / 2 + Math.sin(t * 0.8) * 0.015;
+    window._oceanMesh.rotation.y = Math.cos(t * 0.6) * 0.012;
+    window._oceanMesh.position.y = -0.8;
   }
 
   if (gameState !== 'playing') {
