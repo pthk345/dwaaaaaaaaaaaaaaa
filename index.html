@@ -27,7 +27,7 @@ body{
   color:#fff;
   touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -2196,7 +2196,7 @@ function spawnDeathParticles(pos) {
 // ── ОТРАЖЕНИЕ: перевёрнутая копия тайлов карты ─────────────────
 // ── ОТРАЖЕНИЕ: stencil-маска = точно по силуэту клонов ─────────────────────
 const _MIRROR_Y = -0.25;
-const _REFL_GAP  =  0.12;
+const _REFL_GAP  =  0.05;
 
 function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
