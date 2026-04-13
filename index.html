@@ -1030,7 +1030,7 @@ let enemyId = 0;
 function initThree() {
   const canvas = document.getElementById('canvas');
   
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, stencil: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -2266,11 +2266,13 @@ function spawnDeathParticles(pos) {
 // ── ОТРАЖЕНИЕ ──────────────────────────────────────────────────
 
 // ── ОТРАЖЕНИЕ: перевёрнутая копия тайлов карты ─────────────────
-// ── ОТРАЖЕНИЕ: клон карты (опак) + синий оверлей 30% ────────────────────────
+// ── ОТРАЖЕНИЕ: stencil-маска = точно по силуэту клонов ─────────────────────
 const _MIRROR_Y = -0.25;
+const _REFL_GAP  =  0.6;
 
 function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
+  if (window._blueOverlay) { scene.remove(window._blueOverlay); window._blueOverlay = null; }
 
   const grp = new THREE.Group();
 
@@ -2281,44 +2283,55 @@ function buildReflection() {
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       child.material = mats.map(m => {
         const nm = m.clone();
-        // Полностью непрозрачный — никаких внутренних граней сквозь него не видно
         nm.transparent = false;
         nm.opacity = 1.0;
         nm.depthWrite = true;
-        nm.side = THREE.BackSide; // scale.y=-1 инвертирует winding
+        nm.side = THREE.BackSide;
+        // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
+        nm.stencilWrite = true;
+        nm.stencilFunc  = THREE.AlwaysStencilFunc;
+        nm.stencilZPass = THREE.ReplaceStencilOp;
+        nm.stencilRef   = 1;
         return nm;
       });
       if (child.material.length === 1) child.material = child.material[0];
+      child.receiveShadow = false;
+      child.castShadow    = false;
     });
     grp.add(clone);
   });
 
-  // Зеркало по Y=MIRROR_Y
   grp.scale.set(1, -1, 1);
-  grp.position.y = 2 * _MIRROR_Y;
+  grp.position.y = 2 * _MIRROR_Y - _REFL_GAP;
   grp.renderOrder = 1;
-
   _reflGroup = grp;
   scene.add(grp);
 
-  // Синий оверлей 30% поверх отражения — создаёт эффект воды
-  // Пересоздаём только если ещё нет
-  if (!window._blueOverlay) {
-    const geo = new THREE.PlaneGeometry(120, 120);
+  // ── Синий оверлей: рисуется ТОЛЬКО там где stencil == 1 ──
+  // Плоскость большая — но пиксели без stencil=1 отбрасываются GPU
+  {
+    const geo = new THREE.PlaneGeometry(200, 200);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color: 0x4ab8e8,
       transparent: true,
       opacity: 0.30,
       depthWrite: false,
+      // ── STENCIL TEST: рисуй только где stencil == 1 ──
+      stencilWrite: false,
+      stencilFunc:  THREE.EqualStencilFunc,
+      stencilRef:   1,
+      stencilFail:  THREE.KeepStencilOp,
+      stencilZFail: THREE.KeepStencilOp,
+      stencilZPass: THREE.KeepStencilOp,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(
       (GRID_W - 1) / 2 * TILE_SIZE,
-      _MIRROR_Y + 0.01,
+      _MIRROR_Y - _REFL_GAP / 2 + 0.005,
       (GRID_H - 1) / 2 * TILE_SIZE
     );
-    mesh.renderOrder = 5;
+    mesh.renderOrder = 2; // сразу после клонов (renderOrder 1)
     scene.add(mesh);
     window._blueOverlay = mesh;
   }
