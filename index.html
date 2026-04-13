@@ -1004,6 +1004,7 @@ function initThree() {
   
   // Lighting — dark Kenney style: не пересвечивать
   const ambLight = new THREE.AmbientLight(0xfff0e0, 0.47);
+  ambLight.userData.persistent = true;
   scene.add(ambLight);
 
   const dirLight = new THREE.DirectionalLight(0xffeedd, 1.1);
@@ -1020,13 +1021,16 @@ function initThree() {
   dirLight.shadow.camera.bottom = -30;
   dirLight.shadow.bias = -0.0005;
   dirLight.shadow.normalBias = 0.02;
+  dirLight.userData.persistent = true;
   scene.add(dirLight);
 
   const fillLight = new THREE.DirectionalLight(0x8899cc, 0.35);
   fillLight.position.set(10, 4, -8);
+  fillLight.userData.persistent = true;
   scene.add(fillLight);
 
   const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x887755, 0.3);
+  hemiLight.userData.persistent = true;
   scene.add(hemiLight);
 
   // ── ОКЕАН: плоскость над отражением ──────────────────────────
@@ -1047,6 +1051,7 @@ function initThree() {
       (GRID_H - 1) / 2 * TILE_SIZE
     );
     oceanMesh.renderOrder = 10;
+    oceanMesh.userData.persistent = true;
     scene.add(oceanMesh);
     window._oceanMesh = oceanMesh;
     window._oceanT = 0;
@@ -1055,8 +1060,6 @@ function initThree() {
 
   window.addEventListener('resize', onResize);
 
-  // Save all persistent objects (lights + floor) so clearScene can restore them
-  _persistentObjects = [...scene.children];
 }
 
 function updateCamera() {
@@ -1128,7 +1131,6 @@ const ROCK_POOL=['tile_rock','tile_crystal','tile_rock'];
 // ALL non-persistent scene objects tracked here
 // Lights and floor are added once in initThree and NEVER removed
 let _sceneObjects = [];
-let _persistentObjects = []; // filled at end of initThree
 
 function addToScene(obj) {
   scene.add(obj);
@@ -1136,13 +1138,14 @@ function addToScene(obj) {
 }
 
 function clearScene() {
-  // Удаляем только объекты добавленные через addToScene — НЕ трогаем
-  // persistent lights/ocean/floor которые могли загрузиться асинхронно
-  _sceneObjects.forEach(o => { if (o.parent) o.parent.remove(o); });
-  // Удаляем отражение если есть
-  if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
-  if (window._blueOverlay) { scene.remove(window._blueOverlay); window._blueOverlay = null; }
-  // Восстанавливаем фон неба на случай сброса
+  // Удаляем всё кроме объектов с userData.persistent = true
+  // (lights, ocean — они помечены при создании)
+  const toRemove = scene.children.filter(o => !o.userData.persistent);
+  toRemove.forEach(o => scene.remove(o));
+  // Отражение и оверлей
+  _reflGroup = null;
+  window._blueOverlay = null;
+  // Небо
   if (window._skyTex) scene.background = window._skyTex;
   _sceneObjects = [];
   tileObjects = [];
