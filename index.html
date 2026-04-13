@@ -1426,12 +1426,42 @@ function buildEditorPalette() {
 function openEditor() {
   editorActive = true;
   edCellData = {};
-  // Start with a BLANK grid — only one grass tile in the center as reference
   editorGrid = Array.from({length:GRID_H}, ()=>Array(GRID_W).fill(TILE_GRASS));
   document.getElementById('editor-screen').style.display='flex';
   document.getElementById('main-menu').classList.add('hidden');
   buildEditorPalette();
   if(!scene) { initThree(); }
+
+  // ── Редактор: серый фон + шахматный пол, прячем небо/океан/отражение ──
+  scene.background = new THREE.Color(0x39393b);
+  renderer.setClearColor(0x39393b, 1);
+  if (window._oceanMesh)   window._oceanMesh.visible   = false;
+  if (window._blueOverlay) window._blueOverlay.visible  = false;
+  if (_reflGroup)          _reflGroup.visible           = false;
+
+  // Шахматный пол (canvas-текстура, как Kenney asset preview)
+  if (!window._editorFloor) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const cx = cv.getContext('2d');
+    const c1 = '#4a4a4c', c2 = '#3a3a3c';
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      cx.fillStyle = (x + y) % 2 === 0 ? c1 : c2;
+      cx.fillRect(x*16, y*16, 16, 16);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(40, 40);
+    const mat = new THREE.MeshBasicMaterial({ map: tex });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set((GRID_W-1)/2*TILE_SIZE, -0.01, (GRID_H-1)/2*TILE_SIZE);
+    mesh.userData.persistent = true; // не удаляется clearScene
+    scene.add(mesh);
+    window._editorFloor = mesh;
+  }
+  window._editorFloor.visible = true;
+
   buildEditorEmptyMap();
   gameState = 'editor';
 }
@@ -1469,6 +1499,19 @@ function closeEditor() {
   editorActive = false;
   gameState = 'menu';
   if(edHoverMesh) { edHoverMesh.visible=false; }
+
+  // ── Восстанавливаем небо/океан при выходе из редактора ──
+  if (window._skyTex) {
+    scene.background = window._skyTex;
+  } else {
+    scene.background = new THREE.Color(0x87ceeb);
+  }
+  renderer.setClearColor(0x87ceeb, 1);
+  if (window._oceanMesh)   window._oceanMesh.visible   = true;
+  if (window._blueOverlay) window._blueOverlay.visible  = true;
+  if (_reflGroup)          _reflGroup.visible           = true;
+  if (window._editorFloor) window._editorFloor.visible  = false;
+
   document.getElementById('editor-screen').style.display='none';
   document.getElementById('main-menu').classList.remove('hidden');
 }
@@ -1945,6 +1988,12 @@ function setupEditorEvents() {
     const mapCopy = editorGrid.map(r=>[...r]);
     document.getElementById('editor-screen').style.display='none';
     editorActive=false;
+    // Восстанавливаем небо/океан при старте игры из редактора
+    if (window._skyTex) scene.background = window._skyTex;
+    else scene.background = new THREE.Color(0x87ceeb);
+    renderer.setClearColor(0x87ceeb, 1);
+    if (window._oceanMesh)   window._oceanMesh.visible  = true;
+    if (window._editorFloor) window._editorFloor.visible = false;
     startGame(mapCopy, edCellData);
   });
 }
