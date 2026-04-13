@@ -2196,7 +2196,7 @@ function spawnDeathParticles(pos) {
 // ── ОТРАЖЕНИЕ: перевёрнутая копия тайлов карты ─────────────────
 // ── ОТРАЖЕНИЕ: stencil-маска = точно по силуэту клонов ─────────────────────
 const _MIRROR_Y = -0.25;
-const _REFL_GAP  =  0.2;
+const _REFL_GAP  =  0.12;
 
 function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
@@ -2237,20 +2237,48 @@ function buildReflection() {
 
   // ── Синий оверлей с размытыми краями через canvas-градиент ──
   {
-    // Рисуем текстуру: белая в центре → прозрачная к краям (radial + linear fade)
-    const SZ = 256;
+    // Текстура: полная непрозрачность до 80% от центра, затем плавное размытие к краям
+    // Используем квадратный canvas с линейными градиентами по всем 4 сторонам
+    const SZ = 512;
     const cv = document.createElement('canvas');
     cv.width = cv.height = SZ;
     const cx = cv.getContext('2d');
 
-    // Радиальный градиент — от белого в центре к прозрачному по краям
-    const rg = cx.createRadialGradient(SZ/2, SZ/2, SZ*0.05, SZ/2, SZ/2, SZ*0.62);
-    rg.addColorStop(0.0, 'rgba(255,255,255,1)');
-    rg.addColorStop(0.55, 'rgba(255,255,255,0.95)');
-    rg.addColorStop(0.78, 'rgba(255,255,255,0.5)');
-    rg.addColorStop(1.0, 'rgba(255,255,255,0)');
-    cx.fillStyle = rg;
+    // Сначала заливаем белым
+    cx.fillStyle = 'rgba(255,255,255,1)';
     cx.fillRect(0, 0, SZ, SZ);
+
+    // Fade зона = 20% от края (100% - 80% = 20%)
+    const FADE = SZ * 0.20;
+
+    // Накладываем 4 линейных градиента по краям через destination-out
+    cx.globalCompositeOperation = 'destination-out';
+
+    // Левый край
+    const gl = cx.createLinearGradient(0, 0, FADE, 0);
+    gl.addColorStop(0, 'rgba(0,0,0,1)');
+    gl.addColorStop(1, 'rgba(0,0,0,0)');
+    cx.fillStyle = gl; cx.fillRect(0, 0, FADE, SZ);
+
+    // Правый край
+    const gr = cx.createLinearGradient(SZ, 0, SZ - FADE, 0);
+    gr.addColorStop(0, 'rgba(0,0,0,1)');
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    cx.fillStyle = gr; cx.fillRect(SZ - FADE, 0, FADE, SZ);
+
+    // Верхний край
+    const gt = cx.createLinearGradient(0, 0, 0, FADE);
+    gt.addColorStop(0, 'rgba(0,0,0,1)');
+    gt.addColorStop(1, 'rgba(0,0,0,0)');
+    cx.fillStyle = gt; cx.fillRect(0, 0, SZ, FADE);
+
+    // Нижний край
+    const gb = cx.createLinearGradient(0, SZ, 0, SZ - FADE);
+    gb.addColorStop(0, 'rgba(0,0,0,1)');
+    gb.addColorStop(1, 'rgba(0,0,0,0)');
+    cx.fillStyle = gb; cx.fillRect(0, SZ - FADE, SZ, FADE);
+
+    cx.globalCompositeOperation = 'source-over';
 
     const fadeTex = new THREE.CanvasTexture(cv);
 
