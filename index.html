@@ -958,7 +958,7 @@ let enemyId = 0;
 function initThree() {
   const canvas = document.getElementById('canvas');
   
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, stencil: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, stencil: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -986,6 +986,7 @@ function initThree() {
     // -0.38 = сильно опускаем горизонт, облака заполняют верхние 2/3 экрана
     skyTex.offset.set(0, -0.65);
     scene.background = skyTex;
+    window._skyTex = skyTex;
     renderer.setClearColor(0x87ceeb, 1);
   });
   // ═══════════════════════════════════════════
@@ -1138,6 +1139,12 @@ function clearScene() {
   // Nuclear: wipe entire scene then restore only lights+floor
   while (scene.children.length > 0) scene.remove(scene.children[0]);
   _persistentObjects.forEach(o => scene.add(o));
+  // Восстанавливаем фон неба (scene.background не теряется но на всякий случай)
+  if (window._skyTex) scene.background = window._skyTex;
+  // Восстанавливаем океан если он был загружен но не в _persistentObjects
+  if (window._oceanMesh && !scene.children.includes(window._oceanMesh)) {
+    scene.add(window._oceanMesh);
+  }
   _sceneObjects = [];
   tileObjects = [];
   tileMeshGrid = Array.from({length:GRID_H},()=>Array(GRID_W).fill(null));
