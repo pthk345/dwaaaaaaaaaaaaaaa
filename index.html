@@ -791,83 +791,11 @@ const TILE_END = 7;
 // COORDINATE: row=z (south+), col=x (east+)
 // corner-round rot=0 connects NORTH(row-1) and EAST(col+1)
 // Proof: road verts reach +x edge and -z edge at boundary
-const DEFAULT_MAP = (() => {
-  const G=TILE_GRASS,R=TILE_ROAD,T=TILE_TREE,K=TILE_ROCK,S=TILE_START,E=TILE_END;
-  // 20x20 grid, hand-crafted like Kenney reference
-  // Path snakes: START top-left → right → down → left → down → right → down → left → END
-  const g = Array.from({length:GRID_H},()=>Array(GRID_W).fill(G));
+// ── DEFAULT MAP (твоя карта "base") ──────────────────────────────────────
+const DEFAULT_MAP      = [[0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 5, 0, 0, 0, 1, 2, 1, 1, 1, 4, 1, 4, 1, 1, 0, 0, 0], [0, 0, 5, 4, 0, 0, 0, 0, 2, 0, 4, 4, 0, 5, 0, 1, 4, 1, 0, 0], [1, 0, 0, 1, 1, 1, 1, 1, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0], [4, 0, 0, 1, 0, 0, 0, 1, 2, 1, 1, 1, 1, 1, 1, 1, 5, 4, 0, 0], [2, 2, 0, 1, 1, 1, 0, 1, 3, 1, 0, 0, 0, 0, 0, 1, 1, 0, 4, 0], [5, 2, 2, 2, 2, 3, 2, 2, 2, 0, 0, 0, 0, 0, 4, 0, 1, 1, 0, 5], [4, 0, 1, 1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 4, 0, 1, 4, 0], [0, 0, 1, 0, 0, 4, 0, 0, 0, 0, 5, 4, 0, 5, 1, 0, 0, 1, 0, 4], [0, 0, 1, 0, 0, 0, 0, 0, 4, 0, 4, 0, 0, 0, 0, 4, 0, 1, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 2, 0], [4, 0, 1, 4, 0, 0, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 0, 1, 5, 0], [0, 0, 1, 0, 5, 0, 0, 5, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0], [0, 0, 6, 0, 0, 0, 0, 4, 7, 1, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0], [0, 0, 4, 0, 0, 0, 0, 5, 4, 5, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0], [0, 5, 0, 0, 4, 0, 0, 0, 0, 1, 1, 4, 5, 0, 4, 1, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]];
+const DEFAULT_CELL_DATA = {"10,10": {"modelKey": "snow_tile_rock", "rot": 0, "tileType": 5, "tint": null}, "2,2": {"modelKey": "tile_rock", "rot": 0, "tileType": 5, "tint": null}, "3,2": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "3,3": {"modelKey": "tile_corner_round", "rot": 0, "tileType": 1, "tint": null}, "2,3": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "2,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "3,4": {"modelKey": "tile_straight", "rot": 7.853981633974483, "tileType": 1, "tint": null}, "4,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,3": {"modelKey": "tile_straight", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "4,2": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,2": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,3": {"modelKey": "tile_corner_round", "rot": -4.71238898038469, "tileType": 1, "tint": null}, "5,4": {"modelKey": "tile_straight", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "5,5": {"modelKey": "tile_corner_round", "rot": -7.853981633974483, "tileType": 1, "tint": null}, "4,5": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "3,5": {"modelKey": "tile_straight", "rot": 7.853981633974483, "tileType": 1, "tint": null}, "2,5": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "2,6": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "3,6": {"modelKey": "tile_straight", "rot": 7.853981633974483, "tileType": 1, "tint": null}, "4,6": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,6": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,2": {"modelKey": "tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "6,3": {"modelKey": "tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "6,4": {"modelKey": "tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "6,5": {"modelKey": "tile_river_bridge", "rot": 1.5707963267948966, "tileType": 3, "tint": null}, "6,6": {"modelKey": "tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "7,3": {"modelKey": "tile_straight", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "7,4": {"modelKey": "tile_straight", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "7,5": {"modelKey": "tile_corner_round", "rot": -3.141592653589793, "tileType": 1, "tint": null}, "7,6": {"modelKey": "tile_tree_double", "rot": 1.5707963267948966, "tileType": 4, "tint": null}, "6,7": {"modelKey": "tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "5,7": {"modelKey": "tile_corner_round", "rot": -4.71238898038469, "tileType": 1, "tint": null}, "4,7": {"modelKey": "tile_straight", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "3,7": {"modelKey": "tile_corner_round", "rot": -7.853981633974483, "tileType": 1, "tint": null}, "2,7": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,8": {"modelKey": "tile_river_straight", "rot": 3.141592653589793, "tileType": 2, "tint": null}, "3,8": {"modelKey": "tile_river_straight", "rot": 3.141592653589793, "tileType": 2, "tint": null}, "5,8": {"modelKey": "tile_river_bridge", "rot": 0, "tileType": 3, "tint": null}, "6,8": {"modelKey": "tile_river_corner", "rot": 3.141592653589793, "tileType": 2, "tint": null}, "7,8": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "7,7": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,7": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,6": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,5": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "7,2": {"modelKey": "tile_corner_round", "rot": 0, "tileType": 1, "tint": null}, "2,8": {"modelKey": "tile_river_slope", "rot": 0, "tileType": 2, "tint": null}, "2,9": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "2,10": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "3,9": {"modelKey": "tile_rock", "rot": 0, "tileType": 5, "tint": null}, "3,10": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,9": {"modelKey": "tile_corner_round", "rot": -6.283185307179586, "tileType": 1, "tint": null}, "2,11": {"modelKey": "tile_tree_quad", "rot": 0, "tileType": 4, "tint": null}, "3,11": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,10": {"modelKey": "tile_straight_slope", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "4,11": {"modelKey": "tile_straight_slope", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "1,7": {"modelKey": "tile_slope", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "1,8": {"modelKey": "tile_river_slope", "rot": 3.141592653589793, "tileType": 2, "tint": null}, "1,9": {"modelKey": "tile_slope", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "1,10": {"modelKey": "tile_slope", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "1,11": {"modelKey": "tile_slope", "rot": 0, "tileType": 1, "tint": null}, "1,12": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "2,12": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "2,13": {"modelKey": "tile_rock", "rot": 1.5707963267948966, "tileType": 5, "tint": null}, "3,13": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,13": {"modelKey": "tile_straight", "rot": 14.137166941154069, "tileType": 1, "tint": null}, "2,14": {"modelKey": "tower_square_build_a", "rot": 0, "tileType": 0, "tint": null}, "3,14": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,14": {"modelKey": "tile_straight", "rot": 14.137166941154069, "tileType": 1, "tint": null}, "3,15": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,15": {"modelKey": "tile_corner_round", "rot": -1.5707963267948966, "tileType": 1, "tint": null}, "3,12": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,14": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,15": {"modelKey": "tile_corner_round", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "3,16": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,16": {"modelKey": "tile_crystal", "rot": 0, "tileType": 5, "tint": null}, "5,16": {"modelKey": "tile_corner_round", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "3,17": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,17": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "5,17": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "15,10": {"modelKey": "snow_tile_corner_round", "rot": 3.141592653589793, "tileType": 1, "tint": null}, "15,9": {"modelKey": "snow_tile_straight", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "14,9": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "14,10": {"modelKey": "snow_tile_corner_round", "rot": 0, "tileType": 1, "tint": null}, "14,11": {"modelKey": "snow_tile_bump", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "15,11": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "15,12": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "14,12": {"modelKey": "snow_tile_corner_round", "rot": 3.141592653589793, "tileType": 1, "tint": null}, "14,13": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "15,13": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "15,14": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "14,14": {"modelKey": "snow_tile_corner_round", "rot": 7.853981633974483, "tileType": 1, "tint": null}, "13,13": {"modelKey": "snow_tile_straight", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "13,12": {"modelKey": "snow_tile_corner_round", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "13,11": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "12,12": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "12,13": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "12,14": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "13,14": {"modelKey": "snow_tile_corner_round", "rot": 10.995574287564276, "tileType": 1, "tint": null}, "12,15": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "13,15": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "11,14": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "13,10": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "12,10": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "12,11": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "11,11": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "11,10": {"modelKey": "snow_tile_tree", "rot": 0, "tileType": 4, "tint": null}, "11,12": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "13,9": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "13,8": {"modelKey": "snow_tile_tree", "rot": 0, "tileType": 4, "tint": null}, "14,8": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "15,8": {"modelKey": "snow_tile_end_round", "rot": 1.5707963267948966, "tileType": 7, "tint": null}, "11,13": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "14,15": {"modelKey": "snow_tile_straight", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "15,15": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "10,11": {"modelKey": "snow_tile_tree_double", "rot": 1.5707963267948966, "tileType": 4, "tint": null}, "10,12": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "10,13": {"modelKey": "snow_tile_crystal", "rot": 1.5707963267948966, "tileType": 5, "tint": null}, "10,14": {"modelKey": "snow_tile_slope", "rot": 0, "tileType": 1, "tint": null}, "11,15": {"modelKey": "snow_tile_tree_double", "rot": 1.5707963267948966, "tileType": 4, "tint": null}, "12,16": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "13,16": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "14,16": {"modelKey": "snow_tile_bump", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "15,16": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "14,7": {"modelKey": "snow_tile_crystal", "rot": 0, "tileType": 5, "tint": null}, "15,7": {"modelKey": "snow_tile_tree_double", "rot": 0, "tileType": 4, "tint": null}, "14,6": {"modelKey": "snow_wood_structure_high", "rot": 0, "tileType": 0, "tint": null}, "15,6": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "13,17": {"modelKey": "snow_tile_straight", "rot": 0, "tileType": 1, "tint": null}, "14,17": {"modelKey": "snow_tile_corner_round", "rot": 15.707963267948966, "tileType": 1, "tint": null}, "15,17": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,17": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,16": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,15": {"modelKey": "snow_tile_slope", "rot": 7.853981633974483, "tileType": 1, "tint": null}, "16,14": {"modelKey": "snow_tile_slope", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "16,13": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,12": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,11": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,10": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "16,9": {"modelKey": "snow_tile_rock", "rot": 0, "tileType": 5, "tint": null}, "16,8": {"modelKey": "snow_tile_tree", "rot": 0, "tileType": 4, "tint": null}, "16,7": {"modelKey": "snow_tile_crystal", "rot": 0, "tileType": 5, "tint": null}, "17,8": {"modelKey": "snow_wood_structure", "rot": 0, "tileType": 0, "tint": null}, "17,9": {"modelKey": "snow_tile_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "17,10": {"modelKey": "snow_tile_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "17,11": {"modelKey": "snow_tile_tree_double", "rot": 1.5707963267948966, "tileType": 4, "tint": null}, "17,12": {"modelKey": "snow_tile_rock", "rot": 1.5707963267948966, "tileType": 5, "tint": null}, "17,13": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "17,14": {"modelKey": "snow_tile_tree_double", "rot": 3.141592653589793, "tileType": 4, "tint": null}, "17,15": {"modelKey": "snow_tile_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "17,16": {"modelKey": "snow_tile_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "9,11": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "9,12": {"modelKey": "snow_tile_slope", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "9,13": {"modelKey": "snow_tile_slope", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "5,9": {"modelKey": "tile_corner_round", "rot": -9.42477796076938, "tileType": 1, "tint": null}, "5,10": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,9": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,11": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,12": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,12": {"modelKey": "tile_straight", "rot": 14.137166941154069, "tileType": 1, "tint": null}, "5,11": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,13": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,17": {"modelKey": "tile_corner_round", "rot": 10.995574287564276, "tileType": 1, "tint": null}, "6,16": {"modelKey": "tile_corner_round", "rot": 7.853981633974483, "tileType": 1, "tint": null}, "7,17": {"modelKey": "tile_straight", "rot": 15.707963267948966, "tileType": 1, "tint": null}, "5,18": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "6,18": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "7,18": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,17": {"modelKey": "tile_straight", "rot": 15.707963267948966, "tileType": 1, "tint": null}, "8,18": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,1": {"modelKey": "tile_river_corner", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "7,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "1,3": {"modelKey": "tile_crystal", "rot": 0, "tileType": 5, "tint": null}, "1,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "14,4": {"modelKey": "tile_rock", "rot": 1.5707963267948966, "tileType": 5, "tint": null}, "15,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "15,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "14,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "16,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "16,2": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "15,2": {"modelKey": "tile_spawn_round", "rot": 3.141592653589793, "tileType": 6, "tint": null}, "14,2": {"modelKey": "tile_straight", "rot": 0, "tileType": 1, "tint": null}, "13,3": {"modelKey": "tile_tree_double", "rot": 3.141592653589793, "tileType": 4, "tint": null}, "12,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "13,2": {"modelKey": "tile_straight", "rot": 0, "tileType": 1, "tint": null}, "13,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "15,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "14,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "13,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "12,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "11,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "12,2": {"modelKey": "tile_straight", "rot": 0, "tileType": 1, "tint": null}, "11,2": {"modelKey": "tile_straight", "rot": 0, "tileType": 1, "tint": null}, "16,4": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "17,2": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "17,3": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "16,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "15,0": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "14,0": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "13,0": {"modelKey": "tile_tree_quad", "rot": 0, "tileType": 4, "tint": null}, "12,0": {"modelKey": "wood_structure_high", "rot": 0, "tileType": 0, "tint": null}, "11,0": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "12,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "17,5": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "17,1": {"modelKey": "tile_crystal", "rot": 0, "tileType": 5, "tint": null}, "17,0": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,19": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "7,19": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,19": {"modelKey": "tile_rock", "rot": 1.5707963267948966, "tileType": 5, "tint": null}, "5,19": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "4,18": {"modelKey": "wood_structure_high", "rot": 0, "tileType": 0, "tint": null}, "2,16": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "9,19": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "9,17": {"modelKey": "tile_straight_slope", "rot": 15.707963267948966, "tileType": 1, "tint": null}, "9,18": {"modelKey": "tile_tree_double", "rot": 0, "tileType": 4, "tint": null}, "10,19": {"modelKey": "tile_tree_quad", "rot": 0, "tileType": 4, "tint": null}, "7,16": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,15": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "6,14": {"modelKey": "tile_tree_quad", "rot": 0, "tileType": 4, "tint": null}, "1,14": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "5,1": {"modelKey": "tile_river_corner", "rot": 4.71238898038469, "tileType": 2, "tint": null}, "4,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "8,0": {"modelKey": "wood_structure_high_part", "rot": 0, "tileType": 0, "tint": null}, "7,0": {"modelKey": "tile_tree_double", "rot": 1.5707963267948966, "tileType": 4, "tint": null}, "6,0": {"modelKey": "tile_rock", "rot": 0, "tileType": 5, "tint": null}, "9,1": {"modelKey": "tile", "rot": 0, "tileType": 0, "tint": null}, "5,0": {"modelKey": "tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "4,0": {"modelKey": "tile_tree_quad", "rot": 0, "tileType": 4, "tint": null}, "3,0": {"modelKey": "tile_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "10,2": {"modelKey": "tile_straight_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "9,2": {"modelKey": "tile_straight_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "8,2": {"modelKey": "tile_straight", "rot": 0, "tileType": 1, "tint": null}, "10,17": {"modelKey": "snow_tile_straight", "rot": 0, "tileType": 1, "tint": null}, "11,17": {"modelKey": "snow_tile_straight", "rot": 0, "tileType": 1, "tint": null}, "12,17": {"modelKey": "snow_tile_river_bridge", "rot": 1.5707963267948966, "tileType": 3, "tint": null}, "14,18": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "15,18": {"modelKey": "snow_tile_tree_double", "rot": 3.141592653589793, "tileType": 4, "tint": null}, "13,18": {"modelKey": "snow_tile_rock", "rot": 1.5707963267948966, "tileType": 5, "tint": null}, "12,18": {"modelKey": "snow_tile_river_straight", "rot": 1.5707963267948966, "tileType": 2, "tint": null}, "18,10": {"modelKey": "snow_tile_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "18,9": {"modelKey": "snow_tile_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "18,15": {"modelKey": "snow_tile_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "18,16": {"modelKey": "snow_tile_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "18,12": {"modelKey": "snow_tile_slope", "rot": 12.566370614359172, "tileType": 1, "tint": null}, "0,11": {"modelKey": "tile_slope", "rot": 3.141592653589793, "tileType": 1, "tint": null}, "0,7": {"modelKey": "tile_slope", "rot": 3.141592653589793, "tileType": 1, "tint": null}, "0,9": {"modelKey": "tile_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "0,10": {"modelKey": "tile_slope", "rot": 9.42477796076938, "tileType": 1, "tint": null}, "2,0": {"modelKey": "tower_square_build_b", "rot": 0, "tileType": 0, "tint": null}, "17,4": {"modelKey": "tile_tree_quad", "rot": 0, "tileType": 4, "tint": null}, "0,8": {"modelKey": "tile_river_straight", "rot": 3.141592653589793, "tileType": 2, "tint": null}, "1,6": {"modelKey": "wood_structure", "rot": 0, "tileType": 0, "tint": null}, "1,5": {"modelKey": "wood_structure_part", "rot": 3.141592653589793, "tileType": 0, "tint": null}, "6,10": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "6,12": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "6,13": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "7,14": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "7,15": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "8,16": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "9,3": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "9,4": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "9,5": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "9,6": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "9,7": {"modelKey": "wood_structure_part", "rot": 6.283185307179586, "tileType": 0, "tint": null}, "8,8": {"modelKey": "wood_structure_part", "rot": 7.853981633974483, "tileType": 0, "tint": null}, "7,9": {"modelKey": "wood_structure_high", "rot": 0, "tileType": 0, "tint": null}, "3,1": {"modelKey": "wood_structure_high", "rot": 0, "tileType": 0, "tint": null}, "16,0": {"modelKey": "wood_structure_part", "rot": 0, "tileType": 0, "tint": null}, "12,5": {"modelKey": "wood_structure_part", "rot": 1.5707963267948966, "tileType": 0, "tint": null}, "13,5": {"modelKey": "wood_structure_part", "rot": 1.5707963267948966, "tileType": 0, "tint": null}, "14,5": {"modelKey": "wood_structure_part", "rot": 1.5707963267948966, "tileType": 0, "tint": null}, "15,5": {"modelKey": "wood_structure_part", "rot": 1.5707963267948966, "tileType": 0, "tint": null}, "10,1": {"modelKey": "wood_structure_high_part", "rot": 0, "tileType": 0, "tint": null}, "1,13": {"modelKey": "tile_slope", "rot": 4.71238898038469, "tileType": 1, "tint": null}, "0,12": {"modelKey": "tile_slope", "rot": 1.5707963267948966, "tileType": 1, "tint": null}, "2,15": {"modelKey": "tile_slope", "rot": 0, "tileType": 1, "tint": null}, "1,15": {"modelKey": "tile_slope", "rot": 3.141592653589793, "tileType": 1, "tint": null}, "1,16": {"modelKey": "tile_slope", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "2,17": {"modelKey": "tile_slope", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "3,18": {"modelKey": "tile_slope", "rot": 6.283185307179586, "tileType": 1, "tint": null}, "9,14": {"modelKey": "snow_tile_slope", "rot": 3.141592653589793, "tileType": 1, "tint": null}, "10,15": {"modelKey": "snow_wood_structure", "rot": 0, "tileType": 0, "tint": null}, "9,15": {"modelKey": "snow_tile_tree_double", "rot": 3.141592653589793, "tileType": 4, "tint": null}, "11,8": {"modelKey": "snow_tile_tree_double", "rot": 3.141592653589793, "tileType": 4, "tint": null}, "0,0": {"modelKey": "snow_tile", "rot": 0, "tileType": 0, "tint": null}, "10,5": {"modelKey": "tile_tree", "rot": 0, "tileType": 4, "tint": null}, "8,14": {"modelKey": "wood_structure_part", "rot": 3.141592653589793, "tileType": 0, "tint": null}, "8,13": {"modelKey": "wood_structure_part", "rot": 3.141592653589793, "tileType": 0, "tint": null}, "8,12": {"modelKey": "wood_structure_part", "rot": 3.141592653589793, "tileType": 0, "tint": null}};
+const DEFAULT_FREE_OBJS = [{"modelKey": "tile_end_round", "tint": null, "pos": {"x": 9.4, "y": 4, "z": 11.4}, "rot": {"x": -0.05235987755982988, "y": 3.9269908169872414, "z": 0.05235987755982988}, "scale": 3}, {"modelKey": "tile_end_round", "tint": null, "pos": {"x": 9.4, "y": 4, "z": 11.4}, "rot": {"x": -0.05235987755982988, "y": 3.9269908169872414, "z": 0.05235987755982988}, "scale": 3}, {"modelKey": "tile_end_round", "tint": null, "pos": {"x": 10, "y": 0, "z": 13.3}, "rot": {"x": -0.05235987755982988, "y": 3.0892327760299634, "z": 0}, "scale": 1.95}, {"modelKey": "snow_wood_structure_high", "tint": null, "pos": {"x": 3, "y": 0.1, "z": 11.9}, "rot": {"x": -0.05235987755982988, "y": 3.0892327760299634, "z": 0}, "scale": 0.35}, {"modelKey": "tower_square_build_d", "tint": null, "pos": {"x": 0.1, "y": 0.3, "z": 2}, "rot": {"x": 0, "y": 2.705260340591211, "z": 0}, "scale": 2}, {"modelKey": "tower_square_build_a", "tint": null, "pos": {"x": 2.4, "y": 0, "z": 1.8}, "rot": {"x": 0, "y": 3.6477381366681487, "z": 0}, "scale": 3}, {"modelKey": "tower_round_build_a", "tint": null, "pos": {"x": 17.2, "y": 0, "z": 16.8}, "rot": {"x": 0, "y": 3.9269908169872414, "z": 0}, "scale": 3}, {"modelKey": "tower_round_build_d", "tint": null, "pos": {"x": 16.2, "y": 0, "z": 18}, "rot": {"x": 0, "y": 4.921828490624009, "z": 0}, "scale": 3}, {"modelKey": "tower_round_middle_c", "tint": null, "pos": {"x": 15.1, "y": 0, "z": 17.6}, "rot": {"x": 0, "y": 4.921828490624009, "z": 0}, "scale": 1.25}, {"modelKey": "snow_tile", "tint": null, "pos": {"x": 6.3, "y": 0, "z": 17.6}, "rot": {"x": 0, "y": 4.921828490624009, "z": 0}, "scale": 0.65}, {"modelKey": "snow_tile", "tint": null, "pos": {"x": 6.3, "y": 0, "z": 12.1}, "rot": {"x": 0, "y": 1.8675022996339325, "z": 0}, "scale": 0.65}, {"modelKey": "snow_tile", "tint": null, "pos": {"x": 19, "y": 0, "z": 12.9}, "rot": {"x": 0, "y": 1.8675022996339325, "z": 0}, "scale": 1.6}, {"modelKey": "tile", "tint": null, "pos": {"x": 4.5, "y": -0.1, "z": 9.8}, "rot": {"x": 0, "y": 1.8675022996339325, "z": 0}, "scale": 1.6}, {"modelKey": "tile_tree", "tint": null, "pos": {"x": 2.8, "y": 0.2, "z": 16.4}, "rot": {"x": 0, "y": 1.8675022996339325, "z": 0}, "scale": 0.4}, {"modelKey": "tile_tree", "tint": null, "pos": {"x": 18.6, "y": 0.1, "z": 7.5}, "rot": {"x": 0, "y": 1.2566370614359172, "z": 0}, "scale": 0.4}, {"modelKey": "snow_wood_structure", "tint": null, "pos": {"x": 12.5, "y": 0.1, "z": 16.4}, "rot": {"x": 0, "y": 1.2566370614359172, "z": 0}, "scale": 0.4}, {"modelKey": "snow_wood_structure", "tint": null, "pos": {"x": 11.4, "y": 0.1, "z": 15.6}, "rot": {"x": 0, "y": 2.199114857512855, "z": 0}, "scale": 0.2}, {"modelKey": "snow_tile_tree", "tint": null, "pos": {"x": 18, "y": -0.6, "z": 15.5}, "rot": {"x": 0, "y": 2.199114857512855, "z": 0}, "scale": 3}, {"modelKey": "tile_tree", "tint": null, "pos": {"x": 3.8, "y": -0.1, "z": -0.1}, "rot": {"x": 0, "y": 2.199114857512855, "z": 0}, "scale": 3}, {"modelKey": "tile_tree_quad", "tint": null, "pos": {"x": -0.3, "y": -0.2, "z": 10.4}, "rot": {"x": 0, "y": 2.199114857512855, "z": 0}, "scale": 3}];
 
-  // === PATH ===
-  // Row 1: col 1→16 (E)
-  for(let c=1;c<=16;c++) g[1][c]=R;
-  // Col 16: row 1→5 (S)
-  for(let r=2;r<=5;r++) g[r][16]=R;
-  // Row 5: col 4→16 (W)
-  for(let c=4;c<=15;c++) g[5][c]=R;
-  // Col 4: row 5→9 (S)
-  for(let r=6;r<=9;r++) g[r][4]=R;
-  // Row 9: col 4→16 (E)
-  for(let c=5;c<=16;c++) g[9][c]=R;
-  // Col 16: row 9→13 (S)
-  for(let r=10;r<=13;r++) g[r][16]=R;
-  // Row 13: col 2→16 (W)
-  for(let c=2;c<=15;c++) g[13][c]=R;
-  // Col 2: row 13→17 (S)
-  for(let r=14;r<=17;r++) g[r][2]=R;
-  // Row 17: col 2→18 (E)
-  for(let c=3;c<=18;c++) g[17][c]=R;
-
-  g[1][1]=S; g[17][18]=E;
-
-  // === BIOMES ===
-  // Top-right: dense forest
-  const forest1=[[0,10],[0,11],[0,12],[0,13],[0,14],[0,15],[0,16],[0,17],[0,18],[0,19],
-    [1,17],[1,18],[1,19],[2,17],[2,18],[2,19],[3,17],[3,18],[3,19]];
-  forest1.forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-
-  // Between lanes 1&2: trees + rocks
-  [[2,5],[2,6],[2,7],[2,8],[2,9],[2,10],[2,11],[2,12],[2,13],[2,14],
-   [3,5],[3,6],[3,7],[3,8],[3,9],[3,11],[3,12],[3,13],[3,14],
-   [4,5],[4,6],[4,7],[4,9],[4,10],[4,12],[4,14]
-  ].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-  [[3,10],[4,8],[4,11],[4,13]].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=K;});
-
-  // Between lanes 2&3: mixed
-  [[6,5],[6,6],[6,7],[6,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[6,15],
-   [7,5],[7,6],[7,7],[7,8],[7,9],[7,11],[7,12],[7,13],[7,15],
-   [8,5],[8,6],[8,8],[8,9],[8,11],[8,12],[8,14],[8,15]
-  ].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-  [[7,10],[7,14],[8,7],[8,10],[8,13]].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=K;});
-
-  // Left side tall forest
-  [[0,0],[1,0],[2,0],[3,0],[4,0],[5,0],[6,0],[7,0],[8,0],[9,0],[10,0],[11,0],
-   [2,1],[2,2],[3,1],[3,2],[3,3],[4,1],[4,2],[4,3],
-   [6,1],[6,2],[6,3],[7,1],[7,2],[7,3],[8,1],[8,2],[8,3]
-  ].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-
-  // Between lanes 3&4
-  [[10,5],[10,6],[10,7],[10,8],[10,9],[10,10],[10,11],[10,12],[10,13],[10,14],[10,15],
-   [11,5],[11,6],[11,7],[11,9],[11,10],[11,11],[11,12],[11,13],[11,15],
-   [12,5],[12,6],[12,8],[12,9],[12,11],[12,12],[12,14],[12,15]
-  ].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-  [[11,8],[11,14],[12,7],[12,10],[12,13]].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=K;});
-
-  // Bottom area
-  [[14,3],[14,4],[14,5],[14,6],[14,7],[14,8],[15,3],[15,4],[15,5],[15,7],[15,8],
-   [16,3],[16,4],[16,5],[16,7],[16,8],[16,9],[16,10],[16,11],
-   [18,0],[18,1],[18,2],[18,3],[18,4],[18,5],[18,6],[18,7],[18,8],
-   [19,0],[19,1],[19,2],[19,3],[19,4],[19,5],[19,6],[19,7],[19,8],[19,9],[19,10]
-  ].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-  [[15,6],[16,6]].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=K;});
-
-  // Right-side bottom forest
-  [[14,17],[14,18],[14,19],[15,16],[15,17],[15,18],[15,19],
-   [16,16],[16,17],[16,18],[16,19],[18,15],[18,16],[18,17],[18,18],[18,19],
-   [19,14],[19,15],[19,16],[19,17],[19,18],[19,19]
-  ].forEach(([r,c])=>{if(g[r][c]===G)g[r][c]=T;});
-
-  return g;
-})();
 
 // Pre-computed path from start to end using BFS
 function computePath(grid) {
@@ -2268,7 +2196,7 @@ function spawnDeathParticles(pos) {
 // ── ОТРАЖЕНИЕ: перевёрнутая копия тайлов карты ─────────────────
 // ── ОТРАЖЕНИЕ: stencil-маска = точно по силуэту клонов ─────────────────────
 const _MIRROR_Y = -0.25;
-const _REFL_GAP  =  0.6;
+const _REFL_GAP  =  0.28;
 
 function buildReflection() {
   if (_reflGroup) { scene.remove(_reflGroup); _reflGroup = null; }
@@ -2307,17 +2235,33 @@ function buildReflection() {
   _reflGroup = grp;
   scene.add(grp);
 
-  // ── Синий оверлей: рисуется ТОЛЬКО там где stencil == 1 ──
-  // Плоскость большая — но пиксели без stencil=1 отбрасываются GPU
+  // ── Синий оверлей с размытыми краями через canvas-градиент ──
   {
+    // Рисуем текстуру: белая в центре → прозрачная к краям (radial + linear fade)
+    const SZ = 256;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = SZ;
+    const cx = cv.getContext('2d');
+
+    // Радиальный градиент — от белого в центре к прозрачному по краям
+    const rg = cx.createRadialGradient(SZ/2, SZ/2, SZ*0.05, SZ/2, SZ/2, SZ*0.62);
+    rg.addColorStop(0.0, 'rgba(255,255,255,1)');
+    rg.addColorStop(0.55, 'rgba(255,255,255,0.95)');
+    rg.addColorStop(0.78, 'rgba(255,255,255,0.5)');
+    rg.addColorStop(1.0, 'rgba(255,255,255,0)');
+    cx.fillStyle = rg;
+    cx.fillRect(0, 0, SZ, SZ);
+
+    const fadeTex = new THREE.CanvasTexture(cv);
+
     const geo = new THREE.PlaneGeometry(200, 200);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color: 0x4ab8e8,
+      alphaMap: fadeTex,
       transparent: true,
       opacity: 0.30,
       depthWrite: false,
-      // ── STENCIL TEST: рисуй только где stencil == 1 ──
       stencilWrite: false,
       stencilFunc:  THREE.EqualStencilFunc,
       stencilRef:   1,
@@ -2331,7 +2275,7 @@ function buildReflection() {
       _MIRROR_Y - _REFL_GAP / 2 + 0.005,
       (GRID_H - 1) / 2 * TILE_SIZE
     );
-    mesh.renderOrder = 2; // сразу после клонов (renderOrder 1)
+    mesh.renderOrder = 2;
     scene.add(mesh);
     window._blueOverlay = mesh;
   }
@@ -3071,7 +3015,7 @@ function onWheel(e) {
 // ============================================================
 // GAME FLOW
 // ============================================================
-function startGame(mapGrid, customCellData) {
+function startGame(mapGrid, customCellData, freeObjsData) {
   grid = mapGrid.map(r => [...r]);
   path = computePath(grid);
   
@@ -3093,6 +3037,23 @@ function startGame(mapGrid, customCellData) {
   // Build 3D map
   buildMap(grid, customCellData || null);
   buildReflection();
+  // Загружаем свободно размещённые объекты (декор не на сетке)
+  if (freeObjsData && freeObjsData.length > 0) {
+    freeObjsData.forEach(fo => {
+      const obj = assets.clone(fo.modelKey);
+      if (!obj) return;
+      // Применяем сохранённый scale (в редакторе scale хранится как число)
+      const sc = typeof fo.scale === 'number' ? fo.scale : 1;
+      obj.scale.set(sc, sc, sc);
+      obj.position.set(fo.pos.x, fo.pos.y, fo.pos.z);
+      if (fo.rot) obj.rotation.set(fo.rot.x, fo.rot.y, fo.rot.z);
+      obj.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      obj.userData = { freeObj: true, modelKey: fo.modelKey };
+      scene.add(obj);
+      tileObjects.push(obj); // чтобы попало в отражение
+    });
+    buildReflection(); // перестроим отражение с учётом freeObjs
+  }
   
   // Show game UI
   document.getElementById('main-menu').classList.add('hidden');
@@ -3188,7 +3149,7 @@ function setupEvents() {
   document.getElementById('btn-deselect').addEventListener('click', deselectAll);
   
   // Main menu
-  document.getElementById('btn-play').addEventListener('click', () => startGame(DEFAULT_MAP));
+  document.getElementById('btn-play').addEventListener('click', () => startGame(DEFAULT_MAP, DEFAULT_CELL_DATA, DEFAULT_FREE_OBJS));
   document.getElementById('btn-maps').addEventListener('click', openMyMaps);
   document.getElementById('btn-maps-close').addEventListener('click', () => {
     document.getElementById('my-maps-modal').classList.add('hidden');
@@ -3197,7 +3158,7 @@ function setupEvents() {
   setupEditorEvents();
   
   // Game over
-  document.getElementById('btn-go-retry').addEventListener('click', () => startGame(DEFAULT_MAP));
+  document.getElementById('btn-go-retry').addEventListener('click', () => startGame(DEFAULT_MAP, DEFAULT_CELL_DATA, DEFAULT_FREE_OBJS));
   document.getElementById('btn-go-menu').addEventListener('click', goToMenu);
   document.getElementById('btn-win-menu').addEventListener('click', goToMenu);
 }
