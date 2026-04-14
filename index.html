@@ -963,6 +963,7 @@ function initThree() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = true;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.85;
@@ -1016,24 +1017,26 @@ function initThree() {
   scene.add(hemiLight);
 
   // 2. Главный солнечный свет — тени рисует только он
-  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55); // -30% от 2.2
+  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55);
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // Большой shadowMap + VSM для мягких теней без полос
+  // Tight frustum = больше текселей на единицу площади = чище тени
   sunLight.shadow.mapSize.width  = 2048;
   sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far  = 80;
-  sunLight.shadow.camera.left   = -22;
-  sunLight.shadow.camera.right  =  22;
-  sunLight.shadow.camera.top    =  22;
-  sunLight.shadow.camera.bottom = -22;
+  sunLight.shadow.camera.near = 5;
+  sunLight.shadow.camera.far  = 60;
+  sunLight.shadow.camera.left   = -16;
+  sunLight.shadow.camera.right  =  16;
+  sunLight.shadow.camera.top    =  16;
+  sunLight.shadow.camera.bottom = -16;
 
-  // Главное от полос — нормальный bias и большой radius размытия
-  sunLight.shadow.bias       = -0.0008;
-  sunLight.shadow.normalBias =  0.04;
-  sunLight.shadow.radius     =  8;   // PCFSoft radius — ключ к мягким тням без полос
+  // bias: достаточно отрицательный чтобы убрать acne, не слишком — чтобы не было peter panning
+  // normalBias: убирает полосы на наклонных поверхностях
+  // radius: размытие края тени (мягкость)
+  sunLight.shadow.bias       = -0.003;
+  sunLight.shadow.normalBias =  0.05;
+  sunLight.shadow.radius     =  3;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
