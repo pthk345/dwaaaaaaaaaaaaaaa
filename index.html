@@ -1039,13 +1039,14 @@ function initThree() {
   const FOAM_Y  = _MIRROR_Y + 0.003; // пена чуть выше воды
 
   // Загружаем воду
-  new THREE.TextureLoader().load('assets/water.jpg', (waterTex) => {
+  new THREE.TextureLoader().load('assets/water.png', (waterTex) => {
     waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
     waterTex.repeat.set(6, 6);
     const waterMat = new THREE.MeshBasicMaterial({
       map: waterTex,
-      transparent: false,
-      depthWrite: true,
+      transparent: true,
+      opacity: 0.6,      // 60% непрозрачности = выкручено на 40%
+      depthWrite: false,
     });
     const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), waterMat);
     waterMesh.rotation.x = -Math.PI / 2;
