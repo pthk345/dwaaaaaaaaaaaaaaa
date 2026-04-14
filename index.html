@@ -1034,28 +1034,51 @@ function initThree() {
   scene.add(hemiLight);
 
   // ── ОКЕАН: плоскость над отражением ──────────────────────────
-  new THREE.TextureLoader().load('assets/ocean/ocean.png', (oceanTex) => {
-    oceanTex.wrapS = oceanTex.wrapT = THREE.RepeatWrapping;
-    oceanTex.repeat.set(4, 4);
-    const oceanMat = new THREE.MeshBasicMaterial({
-      map: oceanTex,
+  // ── ВОДА + ПЕНА: две плоскости между островом и отражением ──
+  const WATER_Y = _MIRROR_Y - 0.002; // вода чуть ниже зеркальной плоскости
+  const FOAM_Y  = _MIRROR_Y + 0.003; // пена чуть выше воды
+
+  // Загружаем воду
+  new THREE.TextureLoader().load('assets/water.jpg', (waterTex) => {
+    waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
+    waterTex.repeat.set(6, 6);
+    const waterMat = new THREE.MeshBasicMaterial({
+      map: waterTex,
+      transparent: false,
+      depthWrite: true,
+    });
+    const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), waterMat);
+    waterMesh.rotation.x = -Math.PI / 2;
+    waterMesh.position.set((GRID_W-1)/2*TILE_SIZE, WATER_Y, (GRID_H-1)/2*TILE_SIZE);
+    waterMesh.renderOrder = 5;
+    waterMesh.userData.persistent = true;
+    scene.add(waterMesh);
+    window._waterMesh = waterMesh;
+    window._waterT = 0;
+    if (!_persistentObjects.includes(waterMesh)) _persistentObjects.push(waterMesh);
+  });
+
+  // Загружаем пену (PNG с альфа)
+  new THREE.TextureLoader().load('assets/foam.png', (foamTex) => {
+    foamTex.wrapS = foamTex.wrapT = THREE.RepeatWrapping;
+    foamTex.repeat.set(5, 5);
+    const foamMat = new THREE.MeshBasicMaterial({
+      map: foamTex,
       transparent: true,
-      opacity: 0.55,
+      alphaTest: 0.05,
       depthWrite: false,
     });
-    const oceanMesh = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), oceanMat);
-    oceanMesh.rotation.x = -Math.PI / 2;
-    oceanMesh.position.set(
-      (GRID_W - 1) / 2 * TILE_SIZE,
-      -0.012, // совпадает с MIRROR_Y
-      (GRID_H - 1) / 2 * TILE_SIZE
-    );
-    oceanMesh.renderOrder = 10;
-    oceanMesh.userData.persistent = true;
-    scene.add(oceanMesh);
-    window._oceanMesh = oceanMesh;
-    window._oceanT = 0;
+    const foamMesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), foamMat);
+    foamMesh.rotation.x = -Math.PI / 2;
+    foamMesh.position.set((GRID_W-1)/2*TILE_SIZE, FOAM_Y, (GRID_H-1)/2*TILE_SIZE);
+    foamMesh.renderOrder = 6;
+    foamMesh.userData.persistent = true;
+    scene.add(foamMesh);
+    window._foamMesh = foamMesh;
+    window._foamT = 0;
+    if (!_persistentObjects.includes(foamMesh)) _persistentObjects.push(foamMesh);
   });
+  // ─────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────
 
   window.addEventListener('resize', onResize);
@@ -1551,7 +1574,8 @@ function buildEditorEmptyMap() {
   renderer.setClearColor(0x39393b, 1);
   // Показываем шахматный пол, прячем игровые объекты
   if (window._editorFloor) window._editorFloor.visible = true;
-  if (window._oceanMesh)   window._oceanMesh.visible   = false;
+  if (window._waterMesh) window._waterMesh.visible = false;
+  if (window._foamMesh)  window._foamMesh.visible  = false;
 
   // Grid lines so user can see the cells
   const lineMat=new THREE.LineBasicMaterial({color:0x555555,transparent:true,opacity:0.8});
@@ -1591,7 +1615,8 @@ function closeEditor() {
     scene.background = new THREE.Color(0x87ceeb);
   }
   renderer.setClearColor(0x87ceeb, 1);
-  if (window._oceanMesh)   window._oceanMesh.visible   = true;
+  if (window._waterMesh) window._waterMesh.visible = true;
+  if (window._foamMesh)  window._foamMesh.visible  = true;
   if (window._blueOverlay) window._blueOverlay.visible  = true;
   if (_reflGroup)          _reflGroup.visible           = true;
   if (window._editorFloor) window._editorFloor.visible  = false;
@@ -2084,7 +2109,8 @@ function setupEditorEvents() {
     if (window._skyTex) scene.background = window._skyTex;
     else scene.background = new THREE.Color(0x87ceeb);
     renderer.setClearColor(0x87ceeb, 1);
-    if (window._oceanMesh)   window._oceanMesh.visible  = true;
+    if (window._waterMesh) window._waterMesh.visible = true;
+    if (window._foamMesh)  window._foamMesh.visible  = true;
     if (window._editorFloor) window._editorFloor.visible = false;
     const freeData = edFreeObjects.map(fo => ({
       modelKey: fo.modelKey,
@@ -2479,12 +2505,21 @@ function gameLoop(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1) * gameSpeed;
   lastTime = ts;
 
-  // Анимация океана — медленный сдвиг UV
-  if (window._oceanMesh && window._oceanMesh.material.map) {
-    window._oceanT = (window._oceanT || 0) + 0.0003;
-    window._oceanMesh.material.map.offset.set(
-      Math.sin(window._oceanT * 0.7) * 0.04,
-      window._oceanT * 0.5 % 1
+  // Анимация воды — медленный дрейф UV
+  if (window._waterMesh && window._waterMesh.material.map) {
+    window._waterT = (window._waterT || 0) + 0.00015;
+    window._waterMesh.material.map.offset.set(
+      window._waterT * 0.3 % 1,
+      window._waterT * 0.2 % 1
+    );
+  }
+
+  // Анимация пены — очень медленно плывёт в одну сторону (по диагонали)
+  if (window._foamMesh && window._foamMesh.material.map) {
+    window._foamT = (window._foamT || 0) + 0.00006;
+    window._foamMesh.material.map.offset.set(
+      window._foamT % 1,
+      window._foamT * 0.6 % 1
     );
   }
 
