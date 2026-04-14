@@ -964,8 +964,8 @@ function initThree() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.toneMapping = THREE.LinearToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
   renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
   
   scene = new THREE.Scene();
@@ -1000,38 +1000,63 @@ function initThree() {
   
   raycaster = new THREE.Raycaster();
 
+  // ══ ОСВЕЩЕНИЕ — красивый картунный стиль ══════════════════════
 
-  
-  // Lighting — dark Kenney style: не пересвечивать
-  const ambLight = new THREE.AmbientLight(0xfff0e0, 0.47);
-  ambLight.userData.persistent = true;
-  scene.add(ambLight);
+  // Tone mapping: ACESFilmic даёт приятный контраст и насыщенность
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
 
-  const dirLight = new THREE.DirectionalLight(0xffeedd, 1.1);
-  dirLight.position.set(-6, 20, 10);
-  dirLight.castShadow = true;
-  dirLight.shadow.mapSize.width = 4096;
-  dirLight.shadow.mapSize.height = 4096;
-  dirLight.shadow.camera.near = 0.1;
-  dirLight.shadow.camera.far = 100;
-  // Cover full 20x20 grid (each tile = 1 unit, so 20 units total)
-  dirLight.shadow.camera.left = -30;
-  dirLight.shadow.camera.right = 30;
-  dirLight.shadow.camera.top = 30;
-  dirLight.shadow.camera.bottom = -30;
-  dirLight.shadow.bias = -0.0005;
-  dirLight.shadow.normalBias = 0.02;
-  dirLight.userData.persistent = true;
-  scene.add(dirLight);
+  // 1. Hemisphere light — небо сверху (тёплый голубой) + земля снизу (тёплый зелёный)
+  //    Даёт мягкую "атмосферную" заливку без теней, делает низ моделей чуть теплее
+  const hemiLight = new THREE.HemisphereLight(
+    0xc8e8ff,  // skyColor: нежный голубой
+    0x8fc870,  // groundColor: травяной зелёный
+    0.75
+  );
+  hemiLight.userData.persistent = true;
+  scene.add(hemiLight);
 
-  const fillLight = new THREE.DirectionalLight(0x8899cc, 0.35);
-  fillLight.position.set(10, 4, -8);
+  // 2. Главный солнечный свет — тёплый, под углом ~45° со стороны,
+  //    именно он рисует тени. Позиция: слева-сзади-сверху
+  const sunLight = new THREE.DirectionalLight(0xfff4d0, 2.2);
+  sunLight.position.set(-8, 22, 12);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.width  = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near = 0.5;
+  sunLight.shadow.camera.far  = 120;
+  sunLight.shadow.camera.left   = -28;
+  sunLight.shadow.camera.right  =  28;
+  sunLight.shadow.camera.top    =  28;
+  sunLight.shadow.camera.bottom = -28;
+  // Мягкий bias — убирает shadow acne без peter-panning
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.025;
+  // Мягкие тени (PCFSoft уже включён)
+  sunLight.userData.persistent = true;
+  scene.add(sunLight);
+
+  // 3. Контровой свет (rim) — холодный голубоватый сзади-справа,
+  //    создаёт красивый ободок на краях деревьев и башен
+  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.55);
+  rimLight.position.set(14, 10, -12);
+  rimLight.userData.persistent = true;
+  scene.add(rimLight);
+
+  // 4. Небольшой заполняющий свет спереди — поднимает тёмные грани,
+  //    чтобы детали не проваливались в чёрное
+  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.40);
+  fillLight.position.set(5, 6, 18);
   fillLight.userData.persistent = true;
   scene.add(fillLight);
 
-  const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x887755, 0.3);
-  hemiLight.userData.persistent = true;
-  scene.add(hemiLight);
+  // 5. Тихий ambient — минимальная базовая яркость, чтобы самые тёмные места
+  //    не были абсолютно чёрными
+  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.18);
+  ambLight.userData.persistent = true;
+  scene.add(ambLight);
+
+  // ══════════════════════════════════════════════════════════════
 
   // ── ОКЕАН: плоскость над отражением ──────────────────────────
   // ── ВОДА + ПЕНА: две плоскости между островом и отражением ──
