@@ -1391,6 +1391,87 @@ let edCellData = {}; // key "r,c" -> { modelKey, rot, tileType }
 
 function edKey(r,c){ return r+','+c; }
 
+// ============================================================
+// THUMBNAIL RENDERER — isolated off-screen WebGL context
+// Renders each 3D model to a 72×72 PNG data URL, cached.
+// Uses a completely SEPARATE renderer so it never touches
+// the main renderer context or its state.
+// ============================================================
+const _thumbCache = {};
+let   _thumbRenderer = null;
+let   _thumbScene    = null;
+let   _thumbCamera   = null;
+
+function _ensureThumbRenderer() {
+  if (_thumbRenderer) return;
+  // Hidden canvas — zero size in the DOM, never visible
+  const tc = document.createElement('canvas');
+  tc.width  = 72;
+  tc.height = 72;
+  tc.style.cssText = 'position:absolute;opacity:0;pointer-events:none;width:0;height:0;';
+  document.body.appendChild(tc);
+
+  _thumbRenderer = new THREE.WebGLRenderer({ canvas: tc, antialias: true, alpha: true });
+  _thumbRenderer.setPixelRatio(1);
+  _thumbRenderer.setSize(72, 72);
+  _thumbRenderer.setClearColor(0x000000, 0);
+  _thumbRenderer.outputEncoding = THREE.sRGBEncoding;
+
+  _thumbScene  = new THREE.Scene();
+  _thumbCamera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
+
+  // Lighting for thumbnails — soft + directional
+  _thumbScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.1);
+  dl.position.set(3, 5, 4);
+  _thumbScene.add(dl);
+}
+
+function renderModelThumb(modelKey) {
+  if (_thumbCache[modelKey]) return _thumbCache[modelKey];
+  if (!assets || !assets.models[modelKey]) return '';
+
+  _ensureThumbRenderer();
+
+  const obj = assets.clone(modelKey);
+  if (!obj) return '';
+
+  // Scale to unit size
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxS = Math.max(size.x, size.y, size.z);
+  if (maxS > 0.001) {
+    const s = 1.0 / maxS;
+    obj.scale.set(s, s, s);
+  }
+
+  // Centre pivot
+  box.setFromObject(obj);
+  const ctr = new THREE.Vector3();
+  box.getCenter(ctr);
+  obj.position.sub(ctr);
+
+  _thumbScene.add(obj);
+
+  // Camera: isometric-ish from top-right
+  _thumbCamera.position.set(1.4, 1.4, 1.4);
+  _thumbCamera.lookAt(0, 0, 0);
+
+  _thumbRenderer.render(_thumbScene, _thumbCamera);
+  const dataUrl = _thumbRenderer.domElement.toDataURL('image/png');
+
+  _thumbScene.remove(obj);
+  _thumbCache[modelKey] = dataUrl;
+  return dataUrl;
+}
+
+function getThumbOrFallback(modelKey) {
+  const url = renderModelThumb(modelKey);
+  // Fallback: tiny coloured square if model missing
+  return url || '';
+}
+
 function buildEditorPalette() {
   const pal = document.getElementById('ed-palette');
   pal.innerHTML = '';
@@ -1405,7 +1486,12 @@ function buildEditorPalette() {
     }
     const btn = document.createElement('div');
     btn.className='ed-tile-btn';
-    btn.innerHTML = `<div class="ed-tile-icon"><img src="assets/icons/ic_map.png" style="width:22px;height:22px;filter:none;opacity:.7;"></div><div class="ed-tile-label">${item.label}</div>`;
+    // Рендерим 3D-превью модели в кнопку палитры
+    const thumbUrl = getThumbOrFallback(item.modelKey);
+    const thumbHtml = thumbUrl
+      ? `<img src="${thumbUrl}" style="width:42px;height:42px;object-fit:contain;display:block;">`
+      : `<img src="assets/icons/ic_map.png" style="width:22px;height:22px;opacity:.5;">`;
+    btn.innerHTML = `<div class="ed-tile-icon" style="width:42px;height:42px;">${thumbHtml}</div><div class="ed-tile-label">${item.label}</div>`;
     btn.addEventListener('click',()=>{
       edSelectedTile={...item,rot:0};
       edSelectedCell=null;
@@ -2645,7 +2731,9 @@ function buildBottomPanel() {
     card.dataset.id = def.id;
     card.dataset.cost = def.cost;
     card.dataset.type = 'tower';
-    card.innerHTML = `<div class="item-icon-wrap"><img src="assets/icons/ic_target.png" style="width:36px;height:36px;"></div><div class="item-name">${def.name}</div><div class="item-cost">${def.cost}</div>`;
+    const twThumb = getThumbOrFallback(def.modelKey);
+    const twImg = twThumb ? `<img src="${twThumb}" style="width:52px;height:52px;object-fit:contain;">` : `<img src="assets/icons/ic_target.png" style="width:36px;height:36px;">`;
+    card.innerHTML = `<div class="item-icon-wrap">${twImg}</div><div class="item-name">${def.name}</div><div class="item-cost">${def.cost}</div>`;
     card.addEventListener('click', () => selectTowerType(def));
     card.addEventListener('mouseenter', e => showTooltip(e, def.name, def.desc));
     card.addEventListener('mouseleave', hideTooltip);
@@ -2658,7 +2746,9 @@ function buildBottomPanel() {
     card.dataset.id = def.id;
     card.dataset.cost = def.cost;
     card.dataset.type = 'animal';
-    card.innerHTML = `<div class="item-icon-wrap"><img src="assets/icons/ic_like.png" style="width:36px;height:36px;"></div><div class="item-name">${def.name}</div><div class="item-cost">${def.cost}</div>`;
+    const anThumb = getThumbOrFallback(def.modelKey);
+    const anImg = anThumb ? `<img src="${anThumb}" style="width:52px;height:52px;object-fit:contain;">` : `<img src="assets/icons/ic_like.png" style="width:36px;height:36px;">`;
+    card.innerHTML = `<div class="item-icon-wrap">${anImg}</div><div class="item-name">${def.name}</div><div class="item-cost">${def.cost}</div>`;
     card.addEventListener('click', () => selectTowerType(def));
     card.addEventListener('mouseenter', e => showTooltip(e, def.name, def.desc));
     card.addEventListener('mouseleave', hideTooltip);
@@ -3395,6 +3485,19 @@ async function main() {
   setupEvents();
   
   updateProgress(100, 'Ready!');
+
+  // Pre-render all palette thumbnails while loading screen is still visible
+  // This ensures palette icons are instantly ready when editor opens.
+  // Using setTimeout batches to avoid blocking the main thread.
+  (async () => {
+    _ensureThumbRenderer();
+    const allKeys = [...new Set(ED_PALETTE.map(i => i.modelKey))];
+    for (let i = 0; i < allKeys.length; i++) {
+      renderModelThumb(allKeys[i]);
+      if (i % 10 === 9) await new Promise(r => setTimeout(r, 0)); // yield
+    }
+  })();
+
   await new Promise(r => setTimeout(r, 500));
   
   document.getElementById('loading-screen').classList.add('hidden');
