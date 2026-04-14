@@ -1523,7 +1523,7 @@ function openEditor() {
     const cv = document.createElement('canvas');
     cv.width = cv.height = 128;
     const cx = cv.getContext('2d');
-    const c1 = '#4a4a4c', c2 = '#3a3a3c';
+    const c1 = '#2c2c2e', c2 = '#232325';
     for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
       cx.fillStyle = (x + y) % 2 === 0 ? c1 : c2;
       cx.fillRect(x*16, y*16, 16, 16);
@@ -1681,6 +1681,12 @@ function saveEditorMap() {
     name,
     grid: editorGrid.map(r=>[...r]),
     cellData: {...edCellData},
+    freeObjs: edFreeObjects.map(fo => ({
+      modelKey: fo.modelKey,
+      pos: { x: fo.mesh.position.x, y: fo.mesh.position.y, z: fo.mesh.position.z },
+      rot: { x: fo.mesh.rotation.x, y: fo.mesh.rotation.y, z: fo.mesh.rotation.z },
+      scale: { x: fo.mesh.scale.x, y: fo.mesh.scale.y, z: fo.mesh.scale.z },
+    })),
     date: new Date().toLocaleDateString()
   });
   localStorage.setItem('td_saved_maps', JSON.stringify(saved));
@@ -1959,9 +1965,9 @@ function onGizmoDragMove(e) {
   } else if(edGizmoDragging.type === 'rotate') {
     const spd = 0.02;
     const sr = edGizmoDragging.startRot;
-    if(edGizmoDragging.axis==='x') mesh.rotation.x = sr.x + dy*spd;
-    if(edGizmoDragging.axis==='y') mesh.rotation.y = sr.y + dx*spd;
-    if(edGizmoDragging.axis==='z') mesh.rotation.z = sr.z + dx*spd;
+    if(edGizmoDragging.axis==='x') mesh.rotation.x = sr.x + dy * spd;
+    if(edGizmoDragging.axis==='y') mesh.rotation.y = sr.y - dx * spd;
+    if(edGizmoDragging.axis==='z') mesh.rotation.z = sr.z - dx * spd;
   } else if(edGizmoDragging.type === 'scale') {
     // Drag right/up = bigger, drag left/down = smaller
     const delta = (Math.abs(dx) > Math.abs(dy) ? dx : -dy);
@@ -2078,7 +2084,13 @@ function setupEditorEvents() {
     renderer.setClearColor(0x87ceeb, 1);
     if (window._oceanMesh)   window._oceanMesh.visible  = true;
     if (window._editorFloor) window._editorFloor.visible = false;
-    startGame(mapCopy, edCellData);
+    const freeData = edFreeObjects.map(fo => ({
+      modelKey: fo.modelKey,
+      pos: { x: fo.mesh.position.x, y: fo.mesh.position.y, z: fo.mesh.position.z },
+      rot: { x: fo.mesh.rotation.x, y: fo.mesh.rotation.y, z: fo.mesh.rotation.z },
+      scale: { x: fo.mesh.scale.x, y: fo.mesh.scale.y, z: fo.mesh.scale.z },
+    }));
+    startGame(mapCopy, edCellData, freeData);
   });
 }
 
@@ -2866,9 +2878,19 @@ function onCanvasClick(e) {
     // GRID MODE
     raycaster.setFromCamera(mouse, camera);
 
-    // ERASE MODE — удалить тайл под курсором
+    // ERASE MODE — удалить тайл или free объект
     if(edEraseMode) {
-      // Сначала пробуем попасть в 3D тайл (точнее)
+      // Сначала проверяем free объекты
+      const freeMeshesErase = [];
+      edFreeObjects.forEach(fo => fo.mesh.traverse(m => { if(m.isMesh){ m._foRef=fo; freeMeshesErase.push(m); } }));
+      if(freeMeshesErase.length > 0) {
+        const freeHits = raycaster.intersectObjects(freeMeshesErase, false);
+        if(freeHits.length > 0) {
+          const fo = freeHits[0].object._foRef;
+          if(fo) { deleteFreeObj(fo); document.getElementById('ed-info').textContent='🗑 Объект удалён'; return; }
+        }
+      }
+      // Затем пробуем попасть в 3D тайл
       const tileMeshes = tileObjects.filter(o => o.userData.type === 'tile');
       const tHits = raycaster.intersectObjects(tileMeshes, true);
       let eraseR = -1, eraseC = -1;
@@ -3143,8 +3165,11 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       const obj = assets.clone(fo.modelKey);
       if (!obj) return;
       // Применяем сохранённый scale (в редакторе scale хранится как число)
-      const sc = typeof fo.scale === 'number' ? fo.scale : 1;
+      // scale: объект {x,y,z} или число
       obj.scale.set(sc, sc, sc);
+      if (typeof fo.scale === 'object' && fo.scale !== null) {
+        obj.scale.set(fo.scale.x, fo.scale.y, fo.scale.z);
+      }
       obj.position.set(fo.pos.x, fo.pos.y, fo.pos.z);
       if (fo.rot) obj.rotation.set(fo.rot.x, fo.rot.y, fo.rot.z);
       obj.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
@@ -3293,7 +3318,7 @@ function openMyMaps() {
         const idx = parseInt(btn.dataset.idx);
         const map = saved[idx];
         modal.classList.add('hidden');
-        startGame(map.grid, map.cellData || null);
+        startGame(map.grid, map.cellData || null, map.freeObjs || []);
       });
     });
     list.querySelectorAll('.mm-del').forEach(btn => {
