@@ -965,7 +965,7 @@ function initThree() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 0.85;
   renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
   
   scene = new THREE.Scene();
@@ -1004,55 +1004,54 @@ function initThree() {
 
   // Tone mapping: ACESFilmic даёт приятный контраст и насыщенность
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 0.85; // -30% от 1.15
 
   // 1. Hemisphere light — небо сверху (тёплый голубой) + земля снизу (тёплый зелёный)
-  //    Даёт мягкую "атмосферную" заливку без теней, делает низ моделей чуть теплее
   const hemiLight = new THREE.HemisphereLight(
     0xc8e8ff,  // skyColor: нежный голубой
     0x8fc870,  // groundColor: травяной зелёный
-    0.75
+    0.52       // -30% от 0.75
   );
   hemiLight.userData.persistent = true;
   scene.add(hemiLight);
 
-  // 2. Главный солнечный свет — тёплый, под углом ~45° со стороны,
-  //    именно он рисует тени. Позиция: слева-сзади-сверху
-  const sunLight = new THREE.DirectionalLight(0xfff4d0, 2.2);
+  // 2. Главный солнечный свет — тени рисует только он
+  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55); // -30% от 2.2
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.width  = 4096;
-  sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near = 0.5;
-  sunLight.shadow.camera.far  = 120;
-  sunLight.shadow.camera.left   = -28;
-  sunLight.shadow.camera.right  =  28;
-  sunLight.shadow.camera.top    =  28;
-  sunLight.shadow.camera.bottom = -28;
-  // Мягкий bias — убирает shadow acne без peter-panning
-  sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.025;
-  // Мягкие тени (PCFSoft уже включён)
+
+  // Большой shadowMap + VSM для мягких теней без полос
+  sunLight.shadow.mapSize.width  = 2048;
+  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.camera.near = 1;
+  sunLight.shadow.camera.far  = 80;
+  sunLight.shadow.camera.left   = -22;
+  sunLight.shadow.camera.right  =  22;
+  sunLight.shadow.camera.top    =  22;
+  sunLight.shadow.camera.bottom = -22;
+
+  // Главное от полос — нормальный bias и большой radius размытия
+  sunLight.shadow.bias       = -0.0008;
+  sunLight.shadow.normalBias =  0.04;
+  sunLight.shadow.radius     =  8;   // PCFSoft radius — ключ к мягким тням без полос
+
   sunLight.userData.persistent = true;
   scene.add(sunLight);
 
-  // 3. Контровой свет (rim) — холодный голубоватый сзади-справа,
-  //    создаёт красивый ободок на краях деревьев и башен
-  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.55);
+  // 3. Контровой свет (rim) — холодный голубоватый сзади-справа
+  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.38); // -30%
   rimLight.position.set(14, 10, -12);
   rimLight.userData.persistent = true;
   scene.add(rimLight);
 
-  // 4. Небольшой заполняющий свет спереди — поднимает тёмные грани,
-  //    чтобы детали не проваливались в чёрное
-  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.40);
+  // 4. Заполняющий свет спереди — поднимает тёмные грани
+  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.28); // -30%
   fillLight.position.set(5, 6, 18);
   fillLight.userData.persistent = true;
   scene.add(fillLight);
 
-  // 5. Тихий ambient — минимальная базовая яркость, чтобы самые тёмные места
-  //    не были абсолютно чёрными
-  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.18);
+  // 5. Минимальный ambient
+  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.13); // -30%
   ambLight.userData.persistent = true;
   scene.add(ambLight);
 
