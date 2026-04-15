@@ -155,6 +155,27 @@ body{
   color:#fff;-webkit-text-stroke:4px #000;paint-order:stroke fill;text-shadow:none;
 }
 #btn-speed:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.5);}
+#btn-music{
+  width:58px;height:58px;background:#fff;
+  border-radius:50%;border:3px solid #000;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.5);
+  transition:transform .1s,box-shadow .1s;
+  pointer-events:auto;
+}
+#btn-music:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.5);}
+#btn-music img{width:30px;height:30px;filter:brightness(0);}
+#btn-music-menu{
+  position:absolute;top:16px;right:16px;
+  width:52px;height:52px;background:#fff;
+  border-radius:50%;border:3px solid #000;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.5);
+  transition:transform .1s,box-shadow .1s;
+  pointer-events:auto;z-index:10;
+}
+#btn-music-menu:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.5);}
+#btn-music-menu img{width:26px;height:26px;filter:brightness(0);}
 
 /* ── BOTTOM PANEL ── */
 #bottom-panel{
@@ -346,7 +367,10 @@ body{
 </div>
 
 <!-- Main Menu -->
-<div id="main-menu" class="screen hidden">
+<div id="main-menu" class="screen hidden" style="position:relative;">
+  <button id="btn-music-menu" title="Music on/off">
+    <img id="btn-music-menu-icon" src="assets/icons/ic_music_on.png">
+  </button>
   <div class="logo">Tower Defense</div>
   <div class="subtitle">3D Strategy</div>
   <button class="menu-btn primary" id="btn-play">
@@ -396,6 +420,9 @@ body{
   <div id="hud-br">
     <button id="cam-mode-btn" class="hidden">
       <img src="assets/icons/ic_cursor.png" alt="">
+    </button>
+    <button id="btn-music">
+      <img id="btn-music-icon" src="assets/icons/ic_music_on.png">
     </button>
     <button id="btn-speed">1x</button>
   </div>
@@ -941,8 +968,8 @@ let towerMeshes = {}; // tower id -> Object3D
 // Camera control
 let camTarget = new THREE.Vector3();
 let camAngle = Math.PI / 4;
-let camElevation = Math.PI / 4;
-let camDist = 18;
+let camElevation = Math.PI / 3.2; // выше → видно весь остров сверху
+let camDist = 26;                  // дальше → остров не заполняет весь экран
 let isDragging = false;
 let dragStart = { x:0, y:0 };
 let lastPinchDist = 0;
@@ -1016,24 +1043,28 @@ function initThree() {
   scene.add(hemiLight);
 
   // 2. Главный солнечный свет — тени рисует только он
-  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55); // -30% от 2.2
+  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55);
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // Большой shadowMap + VSM для мягких теней без полос
-  sunLight.shadow.mapSize.width  = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near = 1;
+  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
+  sunLight.shadow.mapSize.width  = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near = 0.5;
   sunLight.shadow.camera.far  = 80;
-  sunLight.shadow.camera.left   = -22;
-  sunLight.shadow.camera.right  =  22;
-  sunLight.shadow.camera.top    =  22;
-  sunLight.shadow.camera.bottom = -22;
+  // Охватываем весь остров 20x20 тайлов
+  sunLight.shadow.camera.left   = -25;
+  sunLight.shadow.camera.right  =  25;
+  sunLight.shadow.camera.top    =  25;
+  sunLight.shadow.camera.bottom = -25;
 
-  // Главное от полос — нормальный bias и большой radius размытия
-  sunLight.shadow.bias       = -0.0008;
-  sunLight.shadow.normalBias =  0.04;
-  sunLight.shadow.radius     =  8;   // PCFSoft radius — ключ к мягким тням без полос
+  // Ключевые параметры мягких теней без полос:
+  // bias: небольшой отрицательный убирает shadow acne
+  // normalBias: компенсирует артефакты на наклонных поверхностях
+  // radius: размытие PCF — чем больше тем мягче тень
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1287,7 +1318,9 @@ function buildMap(g, customCellData) {
   }
   } // end !isEditorMap
 
-  camTarget.set((GRID_W-1)/2*TILE_SIZE,0,(GRID_H-1)/2*TILE_SIZE);
+  camTarget.set((GRID_W-1)/2*TILE_SIZE, 0, (GRID_H-1)/2*TILE_SIZE);
+  camDist = 26;
+  camElevation = Math.PI / 3.2;
   updateCamera();
 }
 
@@ -3522,6 +3555,72 @@ main().catch(err => {
   console.error('Fatal error:', err);
   document.getElementById('progress-label').textContent = 'Error: ' + err.message;
 });
+
+// ══ МУЗЫКАЛЬНЫЙ ПЛЕЕР ══════════════════════════════════════════
+(function() {
+  const TRACKS = [
+    'assets/music/track1.mp3',
+    'assets/music/track2.mp3',
+  ];
+  let _trackIdx = 0;
+  let _muted = false;
+  const _audio = new Audio();
+  _audio.volume = 0.45;
+  _audio.preload = 'none';
+
+  function _playTrack(idx) {
+    _trackIdx = ((idx % TRACKS.length) + TRACKS.length) % TRACKS.length;
+    _audio.src = TRACKS[_trackIdx];
+    _audio.load();
+    if (!_muted) _audio.play().catch(()=>{});
+  }
+
+  // Когда трек закончился — следующий
+  _audio.addEventListener('ended', () => _playTrack(_trackIdx + 1));
+
+  // Запуск после первого взаимодействия пользователя
+  function _startOnInteraction() {
+    if (_audio.paused && !_muted) _playTrack(0);
+    document.removeEventListener('pointerdown', _startOnInteraction);
+    document.removeEventListener('keydown', _startOnInteraction);
+  }
+  document.addEventListener('pointerdown', _startOnInteraction);
+  document.addEventListener('keydown', _startOnInteraction);
+
+  function _updateIcons() {
+    const icon = _muted ? 'assets/icons/ic_music_off.png' : 'assets/icons/ic_music_on.png';
+    const el1 = document.getElementById('btn-music-icon');
+    const el2 = document.getElementById('btn-music-menu-icon');
+    if (el1) el1.src = icon;
+    if (el2) el2.src = icon;
+  }
+
+  function _toggle() {
+    _muted = !_muted;
+    if (_muted) {
+      _audio.pause();
+    } else {
+      if (_audio.src && _audio.paused) {
+        _audio.play().catch(()=>{});
+      } else if (!_audio.src) {
+        _playTrack(0);
+      }
+    }
+    _updateIcons();
+  }
+
+  // Вешаем обработчики после загрузки DOM
+  document.addEventListener('DOMContentLoaded', () => {
+    const b1 = document.getElementById('btn-music');
+    const b2 = document.getElementById('btn-music-menu');
+    if (b1) b1.addEventListener('click', _toggle);
+    if (b2) b2.addEventListener('click', _toggle);
+  });
+
+  window._musicToggle = _toggle;
+})();
+// ═══════════════════════════════════════════════════════════════
+
 </script>
 </body>
 </html>
