@@ -167,13 +167,13 @@ pointer-events:auto;
 #btn-music:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.5);}
 #btn-music img{width:30px;height:30px;filter:brightness(0);}
 #btn-music-menu{
-position:fixed;top:16px;right:16px;
+position:absolute;top:16px;left:16px;
 width:52px;height:52px;background:#fff;
 border-radius:50%;border:3px solid #000;
-display:none;align-items:center;justify-content:center;
+display:flex;align-items:center;justify-content:center;
 cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.5);
 transition:transform .1s,box-shadow .1s;
-pointer-events:auto;z-index:150;
+pointer-events:auto;z-index:10;
 }
 #btn-music-menu:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.5);}
 #btn-music-menu img{width:26px;height:26px;filter:brightness(0);}
@@ -369,15 +369,12 @@ box-shadow:0 6px 0 #000;
   <div class="progress-label" id="progress-label">Loading...</div>
 </div>
 
-<!-- Music toggle — fixed, shown only when main menu is open -->
-
-<button id="btn-music-menu" title="Music on/off" style="display:none;">
-  <img id="btn-music-menu-icon" src="assets/icons/ic_music_on.png">
-</button>
-
 <!-- Main Menu -->
 
-<div id="main-menu" class="screen hidden">
+<div id="main-menu" class="screen hidden" style="position:relative;">
+  <button id="btn-music-menu" title="Music on/off">
+    <img id="btn-music-menu-icon" src="assets/icons/ic_music_on.png">
+  </button>
   <div class="logo">Tower Defense</div>
   <div class="subtitle">3D Strategy</div>
   <button class="menu-btn primary" id="btn-play">
@@ -846,32 +843,67 @@ const DEFAULT_FREE_OBJS = [{"modelKey": "tile_end_round", "tint": null, "pos": {
 
 // Pre-computed path from start to end using BFS
 function computePath(grid) {
-  let start = null, end = null;
+  // Обратная совместимость — возвращает первый найденный путь
+  const all = computeAllPaths(grid);
+  return all.length > 0 ? all[0] : [];
+}
+
+// Находит ВСЕ пути от старта до каждого финиша
+function computeAllPaths(grid) {
+  let start = null;
+  const ends = [];
   for (let r = 0; r < GRID_H; r++)
     for (let c = 0; c < GRID_W; c++) {
       if (grid[r][c] === TILE_START) start = [r,c];
-      if (grid[r][c] === TILE_END) end = [r,c];
+      if (grid[r][c] === TILE_END)   ends.push([r,c]);
     }
-  if (!start || !end) return [];
-  const queue = [[...start, []]];
-  const visited = new Set();
-  const key = (r,c) => r+','+c;
-  visited.add(key(...start));
+  if (!start || ends.length === 0) return [];
+
   const walkable = [TILE_ROAD, TILE_BRIDGE, TILE_START, TILE_END];
-  while (queue.length) {
-    const [r,c,path] = queue.shift();
-    const newPath = [...path, [r,c]];
-    if (r === end[0] && c === end[1]) return newPath;
-    for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-      const nr = r+dr, nc = c+dc;
-      if (nr<0||nr>=GRID_H||nc<0||nc>=GRID_W) continue;
-      if (visited.has(key(nr,nc))) continue;
-      if (!walkable.includes(grid[nr][nc])) continue;
-      visited.add(key(nr,nc));
-      queue.push([nr, nc, newPath]);
+  const key = (r,c) => r+','+c;
+  const results = [];
+
+  for (const end of ends) {
+    // BFS от старта до этого финиша
+    const queue = [[...start, []]];
+    const visited = new Set();
+    visited.add(key(...start));
+    let found = null;
+    while (queue.length) {
+      const [r,c,p] = queue.shift();
+      const newP = [...p, [r,c]];
+      if (r === end[0] && c === end[1]) { found = newP; break; }
+      for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const nr = r+dr, nc = c+dc;
+        if (nr<0||nr>=GRID_H||nc<0||nc>=GRID_W) continue;
+        if (visited.has(key(nr,nc))) continue;
+        if (!walkable.includes(grid[nr][nc])) continue;
+        visited.add(key(nr,nc));
+        queue.push([nr, nc, newP]);
+      }
     }
+    if (found) results.push(found);
   }
-  return [];
+  return results;
+}
+
+// Строит граф смежности дорожных клеток для рандомного выбора на развилках
+function buildRoadGraph(grid) {
+  const walkable = [TILE_ROAD, TILE_BRIDGE, TILE_START, TILE_END];
+  const graph = {};
+  const key = (r,c) => r+','+c;
+  for (let r = 0; r < GRID_H; r++)
+    for (let c = 0; c < GRID_W; c++) {
+      if (!walkable.includes(grid[r][c])) continue;
+      const neighbors = [];
+      for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const nr = r+dr, nc = c+dc;
+        if (nr>=0&&nr<GRID_H&&nc>=0&&nc<GRID_W&&walkable.includes(grid[nr][nc]))
+          neighbors.push([nr,nc]);
+      }
+      graph[key(r,c)] = neighbors;
+    }
+  return graph;
 }
 
 // ============================================================
@@ -969,7 +1001,9 @@ let animFrameId = null;
 
 // Game data
 let grid = null;
-let path = [];
+let path = [];       // первый путь (для совместимости)
+let paths = [];      // все пути от старта до каждого финиша
+let roadGraph = {};  // граф смежности для рандомного выбора на развилках
 let towers = [];
 let enemies = [];
 let projectiles = [];
@@ -1009,7 +1043,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.VSMShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.85;
@@ -1067,21 +1101,24 @@ function initThree() {
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // VSM shadowMap — gaussian blur, no banding stripes
-  sunLight.shadow.mapSize.width  = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far  = 60;
-  // Tight frustum = more texels per unit = cleaner shadows
-  sunLight.shadow.camera.left   = -18;
-  sunLight.shadow.camera.right  =  18;
-  sunLight.shadow.camera.top    =  18;
-  sunLight.shadow.camera.bottom = -18;
+  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
+  sunLight.shadow.mapSize.width  = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near = 0.5;
+  sunLight.shadow.camera.far  = 80;
+  // Охватываем весь остров 20x20 тайлов
+  sunLight.shadow.camera.left   = -25;
+  sunLight.shadow.camera.right  =  25;
+  sunLight.shadow.camera.top    =  25;
+  sunLight.shadow.camera.bottom = -25;
 
-  // VSM: bias=0, normalBias=0 (VSM handles acne differently internally)
-  sunLight.shadow.bias       =  0;
-  sunLight.shadow.normalBias =  0;
-  sunLight.shadow.radius     =  4;
+  // Ключевые параметры мягких теней без полос:
+  // bias: небольшой отрицательный убирает shadow acne
+  // normalBias: компенсирует артефакты на наклонных поверхностях
+  // radius: размытие PCF — чем больше тем мягче тень
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1608,7 +1645,6 @@ function openEditor() {
   editorGrid = Array.from({length:GRID_H}, ()=>Array(GRID_W).fill(TILE_GRASS));
   document.getElementById('editor-screen').style.display='flex';
   document.getElementById('main-menu').classList.add('hidden');
-  { const mmb2 = document.getElementById('btn-music-menu'); if(mmb2) mmb2.style.display='none'; }
   buildEditorPalette();
   if(!scene) { initThree(); }
 
@@ -1696,7 +1732,6 @@ function closeEditor() {
 
   document.getElementById('editor-screen').style.display='none';
   document.getElementById('main-menu').classList.remove('hidden');
-  { const mmb = document.getElementById('btn-music-menu'); if(mmb) mmb.style.display='flex'; }
 }
 
 function editorPlaceTile(r, c) {
@@ -2314,7 +2349,7 @@ function spawnEnemy(typeId, hpMult) {
   model.scale.set(s, s, s);
   
   // Start position
-  const startCell = path[0];
+  const startCell = (paths.length > 0 ? paths[0][0] : path[0]) || path[0];
   model.position.set(startCell[1] * TILE_SIZE, 0.3, startCell[0] * TILE_SIZE);
   model.traverse(m => { if(m.isMesh) m.castShadow = true; });
   addToScene(model);
@@ -2337,6 +2372,10 @@ function spawnEnemy(typeId, hpMult) {
     hp: maxHp, maxHp,
     speed: def.speed,
     pathIdx: 0,
+    // Рандомный путь если несколько финишей, иначе основной
+    ownPath: paths.length > 1
+      ? paths[Math.floor(Math.random() * paths.length)]
+      : path,
     dead: false,
     reached: false,
     slowTimer: 0,
@@ -2555,8 +2594,11 @@ function updateEnemies(dt) {
     const speed = enemy.slowTimer > 0 ? enemy.speed * 0.4 : enemy.speed;
     if (enemy.slowTimer > 0) enemy.slowTimer -= dt;
     
+    // Используем индивидуальный путь врага
+    const ePath = enemy.ownPath || path;
+
     // Move along path
-    if (enemy.pathIdx >= path.length - 1) {
+    if (enemy.pathIdx >= ePath.length - 1) {
       // Reached end
       enemy.reached = true;
       lives--;
@@ -2566,13 +2608,37 @@ function updateEnemies(dt) {
       continue;
     }
     
-    const nextCell = path[enemy.pathIdx + 1];
+    const nextCell = ePath[enemy.pathIdx + 1];
     const target = new THREE.Vector3(nextCell[1] * TILE_SIZE, 0.3, nextCell[0] * TILE_SIZE);
     const dir = target.clone().sub(enemy.model.position);
     const dist = dir.length();
     
     if (dist < 0.05) {
       enemy.pathIdx++;
+
+      // На развилке — проверяем есть ли альтернативные пути
+      // Если да, с вероятностью 40% переключаемся на другой путь к другому финишу
+      if (paths.length > 1 && enemy.pathIdx < ePath.length - 1) {
+        const curCell = ePath[enemy.pathIdx];
+        const curKey = curCell[0]+','+curCell[1];
+        const neighbors = roadGraph[curKey] || [];
+        // Это развилка если у текущей клетки 3+ соседа (не считая откуда пришли)
+        if (neighbors.length >= 3 && Math.random() < 0.4) {
+          // Выбираем случайный путь который проходит через текущую клетку
+          const validPaths = paths.filter(p => {
+            return p.some(([r,c]) => r === curCell[0] && c === curCell[1]);
+          });
+          if (validPaths.length > 1) {
+            const newPath = validPaths[Math.floor(Math.random() * validPaths.length)];
+            // Находим позицию текущей клетки в новом пути
+            const newIdx = newPath.findIndex(([r,c]) => r === curCell[0] && c === curCell[1]);
+            if (newIdx >= 0) {
+              enemy.ownPath = newPath;
+              enemy.pathIdx = newIdx;
+            }
+          }
+        }
+      }
     } else {
       dir.normalize();
       enemy.model.position.add(dir.multiplyScalar(speed * dt));
@@ -3178,6 +3244,8 @@ function onWheel(e) {
 function startGame(mapGrid, customCellData, freeObjsData) {
   grid = mapGrid.map(r => [...r]);
   path = computePath(grid);
+  paths = computeAllPaths(grid);
+  roadGraph = buildRoadGraph(grid);
   
   // Reset state
   towers = [];
@@ -3220,7 +3288,6 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   
   // Show game UI
   document.getElementById('main-menu').classList.add('hidden');
-  { const mmb2 = document.getElementById('btn-music-menu'); if(mmb2) mmb2.style.display='none'; }
   document.getElementById('hud').classList.remove('hidden');
   document.getElementById('bottom-panel').classList.remove('hidden');
   document.getElementById('game-over-screen').classList.add('hidden');
@@ -3262,7 +3329,6 @@ function goToMenu() {
   document.getElementById('game-over-screen').classList.add('hidden');
   document.getElementById('win-screen').classList.add('hidden');
   document.getElementById('main-menu').classList.remove('hidden');
-  { const mmb = document.getElementById('btn-music-menu'); if(mmb) mmb.style.display='flex'; }
   hideTowerInfo();
   deselectAll();
 }
@@ -3567,7 +3633,6 @@ async function main() {
   
   document.getElementById('loading-screen').classList.add('hidden');
   document.getElementById('main-menu').classList.remove('hidden');
-  { const mmb = document.getElementById('btn-music-menu'); if(mmb) mmb.style.display='flex'; }
   
   gameState = 'menu';
   requestAnimationFrame(gameLoop);
@@ -3631,13 +3696,20 @@ main().catch(err => {
     _updateIcons();
   }
 
-  // Вешаем обработчики после загрузки DOM
-  document.addEventListener('DOMContentLoaded', () => {
+  // Модуль выполняется после парсинга DOM — DOMContentLoaded уже сработал.
+  // Используем прямой поиск элементов + requestAnimationFrame для гарантии.
+  function _wireButtons() {
     const b1 = document.getElementById('btn-music');
     const b2 = document.getElementById('btn-music-menu');
     if (b1) b1.addEventListener('click', _toggle);
     if (b2) b2.addEventListener('click', _toggle);
-  });
+  }
+  // Если DOM уже готов — вешаем сразу, иначе ждём
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _wireButtons);
+  } else {
+    _wireButtons();
+  }
 
   window._musicToggle = _toggle;
 })();
