@@ -2283,14 +2283,14 @@ function placeTower(row, col, def) {
   if (def.id === 'lightning') {
     const turretModel = assets.clone('weapon_turret');
     if (turretModel) {
-      // Масштаб: крупная голова — хорошо видна поверх башни
+      // Масштаб: маленький, красиво сидит поверх
       const tb = new THREE.Box3().setFromObject(turretModel);
       const ts = new THREE.Vector3();
       tb.getSize(ts);
       const tm = Math.max(ts.x, ts.y, ts.z);
-      if (tm > 0) { const sc = 0.95 / tm; turretModel.scale.set(sc, sc, sc); }
-      // Поднимаем высоко над основанием башни
-      turretModel.position.set(0, 0.90, 0);
+      if (tm > 0) { const sc = 0.38 / tm; turretModel.scale.set(sc, sc, sc); }
+      // Поднимаем выше основания башни
+      turretModel.position.set(0, 0.55, 0);
       turretModel.traverse(m => { if(m.isMesh) m.castShadow = true; });
       turretModel.userData.isLightningTurret = true;
       model.add(turretModel); // дочерний объект — двигается вместе с башней
@@ -2774,34 +2774,13 @@ function updateEnemies(dt) {
     } else {
       dir.normalize();
       enemy.model.position.add(dir.multiplyScalar(speed * dt));
-
-      // ── Плавные повороты на изгибах: смотрим вперёд на следующую клетку ──
-      // Берём взвешенную сумму направлений текущего и следующего сегмента
-      // чтобы враг начинал поворачивать заранее, а не в момент прихода в точку
-      let blendedDir = dir.clone();
-      if (enemy.pathIdx + 2 < ePath.length) {
-        const nextNext = ePath[enemy.pathIdx + 2];
-        const nextTarget = new THREE.Vector3(nextCell[1] * TILE_SIZE, 0, nextCell[0] * TILE_SIZE);
-        const futureDir = new THREE.Vector3(
-          nextNext[1] * TILE_SIZE - nextTarget.x,
-          0,
-          nextNext[0] * TILE_SIZE - nextTarget.z
-        ).normalize();
-        // Вес lookahead зависит от того как близко мы к следующей точке
-        // Чем ближе (dist мал) — тем больше смотрим вперёд
-        const lookaheadWeight = Math.max(0, 1 - dist / 0.8);
-        blendedDir.lerp(futureDir, lookaheadWeight * 0.6);
-        blendedDir.normalize();
-      }
-
-      // Quaternion slerp для совсем плавного поворота без прыжков
-      const targetY = Math.atan2(blendedDir.x, blendedDir.z);
-      const targetQuat = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(enemy.model.rotation.x, targetY, enemy.model.rotation.z)
-      );
-      // Скорость поворота: 6 рад/с → плавно но достаточно быстро
-      const rotSpeed = 6.0 * dt;
-      enemy.model.quaternion.slerp(targetQuat, Math.min(1, rotSpeed));
+      // Плавный поворот через lerp угла вместо мгновенного snap
+      const targetY = Math.atan2(dir.x, dir.z);
+      // Кратчайший путь между углами (избегаем прыжка через 360°)
+      let delta = targetY - enemy.model.rotation.y;
+      while (delta >  Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      enemy.model.rotation.y += delta * Math.min(1, 8 * dt);
     }
   }
   
