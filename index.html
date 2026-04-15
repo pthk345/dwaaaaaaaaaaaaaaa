@@ -2278,25 +2278,6 @@ function placeTower(row, col, def) {
   model.userData = { towerId: tower.id };
   addToScene(model);
   towerMeshes[tower.id] = model;
-
-  // ── Lightning: добавляем turret-голову поверх башни ──
-  if (def.id === 'lightning') {
-    const turretModel = assets.clone('weapon_turret');
-    if (turretModel) {
-      // Масштаб: маленький, красиво сидит поверх
-      const tb = new THREE.Box3().setFromObject(turretModel);
-      const ts = new THREE.Vector3();
-      tb.getSize(ts);
-      const tm = Math.max(ts.x, ts.y, ts.z);
-      if (tm > 0) { const sc = 0.38 / tm; turretModel.scale.set(sc, sc, sc); }
-      // Поднимаем выше основания башни
-      turretModel.position.set(0, 0.55, 0);
-      turretModel.traverse(m => { if(m.isMesh) m.castShadow = true; });
-      turretModel.userData.isLightningTurret = true;
-      model.add(turretModel); // дочерний объект — двигается вместе с башней
-      tower._turretHead = turretModel;
-    }
-  }
   
   return true;
 }
@@ -2318,13 +2299,14 @@ function upgradeTower(tower) {
   const mesh = towerMeshes[tower.id];
   if (mesh) {
     mesh.scale.multiplyScalar(1.1);
-    // Чистый scale-пульс вместо emissive (который ломает материалы Kenney)
-    const origScale = mesh.scale.clone();
-    const pulseScale = origScale.clone().multiplyScalar(1.18);
-    mesh.scale.copy(pulseScale);
-    setTimeout(() => { if (towerMeshes[tower.id]) mesh.scale.copy(origScale); }, 250);
-    // Партикл-вспышка
-    spawnHitParticle(mesh.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0);
+    // Flash
+    mesh.traverse(m => {
+      if (m.isMesh && m.material) {
+        const orig = m.material.emissive ? m.material.emissive.clone() : new THREE.Color(0);
+        if (m.material.emissive) m.material.emissive.set(0xffff00);
+        setTimeout(() => { if(m.material.emissive) m.material.emissive.copy(orig); }, 300);
+      }
+    });
   }
   
   updateHUD();
@@ -2774,13 +2756,7 @@ function updateEnemies(dt) {
     } else {
       dir.normalize();
       enemy.model.position.add(dir.multiplyScalar(speed * dt));
-      // Плавный поворот через lerp угла вместо мгновенного snap
-      const targetY = Math.atan2(dir.x, dir.z);
-      // Кратчайший путь между углами (избегаем прыжка через 360°)
-      let delta = targetY - enemy.model.rotation.y;
-      while (delta >  Math.PI) delta -= Math.PI * 2;
-      while (delta < -Math.PI) delta += Math.PI * 2;
-      enemy.model.rotation.y += delta * Math.min(1, 8 * dt);
+      enemy.model.rotation.y = Math.atan2(dir.x, dir.z);
     }
   }
   
@@ -2790,28 +2766,6 @@ function updateEnemies(dt) {
 
 function updateTowers(dt) {
   for (const tower of towers) {
-    // Lightning turret: плавно возвращается в нейтраль если нет цели в зоне
-    if (tower.def.id === 'lightning' && tower._turretHead) {
-      const tPos0 = new THREE.Vector3(tower.col * TILE_SIZE, 0, tower.row * TILE_SIZE);
-      const nearest = enemies.filter(e => !e.dead && !e.reached)
-        .sort((a,b) => tPos0.distanceTo(a.model.position) - tPos0.distanceTo(b.model.position))[0];
-      if (nearest && tPos0.distanceTo(nearest.model.position) <= tower.range * 1.5) {
-        // Плавно следить за ближайшим врагом даже между выстрелами
-        const dir2 = nearest.model.position.clone().sub(tPos0);
-        const dist2 = dir2.length();
-        const tY = Math.atan2(dir2.x, dir2.z);
-        let dy = tY - tower._turretHead.rotation.y;
-        while (dy >  Math.PI) dy -= Math.PI * 2;
-        while (dy < -Math.PI) dy += Math.PI * 2;
-        tower._turretHead.rotation.y += dy * 0.08;
-        const tX = -Math.atan2(0.3, Math.max(dist2, 0.5));
-        tower._turretHead.rotation.x += (tX - tower._turretHead.rotation.x) * 0.08;
-      } else {
-        // Возврат в нейтраль
-        tower._turretHead.rotation.x += (0 - tower._turretHead.rotation.x) * 0.05;
-      }
-    }
-
     tower.cooldown = Math.max(0, tower.cooldown - dt);
     if (tower.cooldown > 0) continue;
     
@@ -2847,31 +2801,8 @@ function updateTowers(dt) {
     // Rotate tower toward enemy
     const mesh = towerMeshes[tower.id];
     if (mesh) {
-      if (tower.def.id === 'lightning') {
-        // Lightning: база не вращается — только turret-голова наводится плавно
-        if (tower._turretHead && best) {
-          const tPos2 = new THREE.Vector3(tower.col * TILE_SIZE, 0, tower.row * TILE_SIZE);
-          const dir2 = best.model.position.clone().sub(tPos2);
-          const dist2 = dir2.length();
-          // Горизонтальный поворот
-          const targetY = Math.atan2(dir2.x, dir2.z);
-          let dy = targetY - tower._turretHead.rotation.y;
-          while (dy >  Math.PI) dy -= Math.PI * 2;
-          while (dy < -Math.PI) dy += Math.PI * 2;
-          tower._turretHead.rotation.y += dy * 0.12;
-          // Вертикальный наклон — чуть вниз к врагу (максимум -25°)
-          const targetX = -Math.atan2(0.3, Math.max(dist2, 0.5));
-          tower._turretHead.rotation.x += (targetX - tower._turretHead.rotation.x) * 0.1;
-        }
-      } else {
-        const dir = best.model.position.clone().sub(mesh.position);
-        // Плавный поворот башни
-        const targetY = Math.atan2(dir.x, dir.z);
-        let dy = targetY - mesh.rotation.y;
-        while (dy >  Math.PI) dy -= Math.PI * 2;
-        while (dy < -Math.PI) dy += Math.PI * 2;
-        mesh.rotation.y += dy * 0.15;
-      }
+      const dir = best.model.position.clone().sub(mesh.position);
+      mesh.rotation.y = Math.atan2(dir.x, dir.z);
     }
   }
 }
