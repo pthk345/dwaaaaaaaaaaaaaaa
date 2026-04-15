@@ -170,7 +170,7 @@ pointer-events:auto;
 position:fixed;top:16px;right:16px;
 width:52px;height:52px;background:#fff;
 border-radius:50%;border:3px solid #000;
-display:flex;align-items:center;justify-content:center;
+display:none;align-items:center;justify-content:center;
 cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.5);
 transition:transform .1s,box-shadow .1s;
 pointer-events:auto;z-index:150;
@@ -369,9 +369,9 @@ box-shadow:0 6px 0 #000;
   <div class="progress-label" id="progress-label">Loading...</div>
 </div>
 
-<!-- Music button — fixed top-right, visible on main menu -->
+<!-- Music toggle — fixed, shown only when main menu is open -->
 
-<button id="btn-music-menu" title="Music on/off">
+<button id="btn-music-menu" title="Music on/off" style="display:none;">
   <img id="btn-music-menu-icon" src="assets/icons/ic_music_on.png">
 </button>
 
@@ -1009,7 +1009,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.85;
@@ -1067,24 +1067,21 @@ function initThree() {
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
-  sunLight.shadow.mapSize.width  = 4096;
-  sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near = 0.5;
-  sunLight.shadow.camera.far  = 80;
-  // Охватываем весь остров 20x20 тайлов
-  sunLight.shadow.camera.left   = -25;
-  sunLight.shadow.camera.right  =  25;
-  sunLight.shadow.camera.top    =  25;
-  sunLight.shadow.camera.bottom = -25;
+  // VSM shadowMap — gaussian blur, no banding stripes
+  sunLight.shadow.mapSize.width  = 2048;
+  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.camera.near = 1;
+  sunLight.shadow.camera.far  = 60;
+  // Tight frustum = more texels per unit = cleaner shadows
+  sunLight.shadow.camera.left   = -18;
+  sunLight.shadow.camera.right  =  18;
+  sunLight.shadow.camera.top    =  18;
+  sunLight.shadow.camera.bottom = -18;
 
-  // Ключевые параметры мягких теней без полос:
-  // bias: небольшой отрицательный убирает shadow acne
-  // normalBias: компенсирует артефакты на наклонных поверхностях
-  // radius: размытие PCF — чем больше тем мягче тень
-  sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  12;
+  // VSM: bias=0, normalBias=0 (VSM handles acne differently internally)
+  sunLight.shadow.bias       =  0;
+  sunLight.shadow.normalBias =  0;
+  sunLight.shadow.radius     =  4;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1611,6 +1608,7 @@ function openEditor() {
   editorGrid = Array.from({length:GRID_H}, ()=>Array(GRID_W).fill(TILE_GRASS));
   document.getElementById('editor-screen').style.display='flex';
   document.getElementById('main-menu').classList.add('hidden');
+  { const mmb2 = document.getElementById('btn-music-menu'); if(mmb2) mmb2.style.display='none'; }
   buildEditorPalette();
   if(!scene) { initThree(); }
 
@@ -1698,6 +1696,7 @@ function closeEditor() {
 
   document.getElementById('editor-screen').style.display='none';
   document.getElementById('main-menu').classList.remove('hidden');
+  { const mmb = document.getElementById('btn-music-menu'); if(mmb) mmb.style.display='flex'; }
 }
 
 function editorPlaceTile(r, c) {
@@ -3221,6 +3220,7 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   
   // Show game UI
   document.getElementById('main-menu').classList.add('hidden');
+  { const mmb2 = document.getElementById('btn-music-menu'); if(mmb2) mmb2.style.display='none'; }
   document.getElementById('hud').classList.remove('hidden');
   document.getElementById('bottom-panel').classList.remove('hidden');
   document.getElementById('game-over-screen').classList.add('hidden');
@@ -3262,6 +3262,7 @@ function goToMenu() {
   document.getElementById('game-over-screen').classList.add('hidden');
   document.getElementById('win-screen').classList.add('hidden');
   document.getElementById('main-menu').classList.remove('hidden');
+  { const mmb = document.getElementById('btn-music-menu'); if(mmb) mmb.style.display='flex'; }
   hideTowerInfo();
   deselectAll();
 }
@@ -3566,6 +3567,7 @@ async function main() {
   
   document.getElementById('loading-screen').classList.add('hidden');
   document.getElementById('main-menu').classList.remove('hidden');
+  { const mmb = document.getElementById('btn-music-menu'); if(mmb) mmb.style.display='flex'; }
   
   gameState = 'menu';
   requestAnimationFrame(gameLoop);
@@ -3629,20 +3631,13 @@ main().catch(err => {
     _updateIcons();
   }
 
-  // Модуль выполняется после парсинга DOM — DOMContentLoaded уже сработал.
-  // Используем прямой поиск элементов + requestAnimationFrame для гарантии.
-  function _wireButtons() {
+  // Вешаем обработчики после загрузки DOM
+  document.addEventListener('DOMContentLoaded', () => {
     const b1 = document.getElementById('btn-music');
     const b2 = document.getElementById('btn-music-menu');
     if (b1) b1.addEventListener('click', _toggle);
     if (b2) b2.addEventListener('click', _toggle);
-  }
-  // Если DOM уже готов — вешаем сразу, иначе ждём
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _wireButtons);
-  } else {
-    _wireButtons();
-  }
+  });
 
   window._musicToggle = _toggle;
 })();
