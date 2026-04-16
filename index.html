@@ -613,12 +613,10 @@ function _applyEdgeHighlight(mat) {
 
   mat.onBeforeCompile = (shader) => {
 
-    // === UNIFORMS ===
-    shader.uniforms.uEdgeIntensity = { value: 1.2 };
-    shader.uniforms.uEdgeWidth = { value: 0.2 };
-    shader.uniforms.uColor = { value: mat.color };
+    shader.uniforms.uEdgeIntensity = { value: 2.0 }; // СИЛЬНО
+    shader.uniforms.uEdgeWidth = { value: 0.05 };    // УЗКО (чтобы было видно)
 
-    // === VERTEX ===
+    // ВЕРТЕКС
     shader.vertexShader = `
       varying vec3 vWorldNormal;
     ` + shader.vertexShader;
@@ -629,35 +627,35 @@ function _applyEdgeHighlight(mat) {
        vWorldNormal = normalize(mat3(modelMatrix) * normal);`
     );
 
-    // === FRAGMENT ===
+    // ФРАГМЕНТ
     shader.fragmentShader = `
       uniform float uEdgeIntensity;
       uniform float uEdgeWidth;
-      uniform vec3 uColor;
       varying vec3 vWorldNormal;
     ` + shader.fragmentShader;
 
+    // 🔴 ВАЖНО: вставляем ДО вывода цвета
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <output_fragment>',
+      '#include <dithering_fragment>',
       `
-      #include <output_fragment>
-
+      // EDGE HIGHLIGHT
       vec3 dx = dFdx(vWorldNormal);
       vec3 dy = dFdy(vWorldNormal);
 
       float curvature = length(dx) + length(dy);
 
-      float edge = smoothstep(uEdgeWidth, uEdgeWidth * 2.0, curvature);
+      float edge = smoothstep(uEdgeWidth, uEdgeWidth * 3.0, curvature);
       edge *= uEdgeIntensity;
 
-      gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), edge);
+      gl_FragColor.rgb += edge;
+
+      #include <dithering_fragment>
       `
     );
   };
 
   mat.needsUpdate = true;
-}
-// ════════════════════════════════════════════════════════════════
+}// ════════════════════════════════════════════════════════════════
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
