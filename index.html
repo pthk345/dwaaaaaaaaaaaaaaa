@@ -610,34 +610,51 @@ function loadTextureOnce(url) {
 function _applyEdgeHighlight(mat) {
   if (!mat || mat._edgePatched) return;
   mat._edgePatched = true;
-  mat.onBeforeCompile = (shader) => {
-    // Expose world-space normal to fragment shader
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `#include <worldpos_vertex>
-vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
-    );
-    shader.vertexShader = 'varying vec3 vWorldNormal;\n' + shader.vertexShader;
-    shader.fragmentShader = 'varying vec3 vWorldNormal;\n' + shader.fragmentShader;
 
-    // Inject uniforms and edge-highlight at the END of fragment main
+  mat.onBeforeCompile = (shader) => {
+
+    // === UNIFORMS ===
+    shader.uniforms.uEdgeIntensity = { value: 1.2 };
+    shader.uniforms.uEdgeWidth = { value: 0.2 };
+    shader.uniforms.uColor = { value: mat.color };
+
+    // === VERTEX ===
+    shader.vertexShader = `
+      varying vec3 vWorldNormal;
+    ` + shader.vertexShader;
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       vWorldNormal = normalize(mat3(modelMatrix) * normal);`
+    );
+
+    // === FRAGMENT ===
+    shader.fragmentShader = `
+      uniform float uEdgeIntensity;
+      uniform float uEdgeWidth;
+      uniform vec3 uColor;
+      varying vec3 vWorldNormal;
+    ` + shader.fragmentShader;
+
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <output_fragment>',
-      `#include <output_fragment>
-// Edge highlight: screen-space normal derivative detects geometric edges
-{
-  vec3 ddx = dFdx(vWorldNormal);
-  vec3 ddy = dFdy(vWorldNormal);
-  float edgeMag = length(ddx) + length(ddy);
-  // edgeMag large = steep normal change = polygon edge
-  // Soft threshold — remap to 0..1 highlight strength
-  float edgeStrength = smoothstep(0.15, 1.2, edgeMag * 6.0);
-  // Brighten towards white, preserving hue
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, min(gl_FragColor.rgb * 2.2 + 0.12, vec3(1.0)), edgeStrength * 0.55);
-}
-`
+      `
+      #include <output_fragment>
+
+      vec3 dx = dFdx(vWorldNormal);
+      vec3 dy = dFdy(vWorldNormal);
+
+      float curvature = length(dx) + length(dy);
+
+      float edge = smoothstep(uEdgeWidth, uEdgeWidth * 2.0, curvature);
+      edge *= uEdgeIntensity;
+
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), edge);
+      `
     );
   };
+
   mat.needsUpdate = true;
 }
 // ════════════════════════════════════════════════════════════════
