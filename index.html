@@ -613,43 +613,37 @@ function _applyEdgeHighlight(mat) {
 
   mat.onBeforeCompile = (shader) => {
 
-    shader.uniforms.uEdgeIntensity = { value: 2.0 }; // СИЛЬНО
-    shader.uniforms.uEdgeWidth = { value: 0.05 };    // УЗКО (чтобы было видно)
+    shader.uniforms.uEdgeIntensity = { value: 1.5 };
+    shader.uniforms.uEdgeWidth = { value: 0.6 };
 
-    // ВЕРТЕКС
+    // VERTEX
     shader.vertexShader = `
-      varying vec3 vWorldNormal;
+      varying vec3 vNormalView;
     ` + shader.vertexShader;
 
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-       vWorldNormal = normalize(mat3(modelMatrix) * normal);`
+      '#include <beginnormal_vertex>',
+      `#include <beginnormal_vertex>
+       vNormalView = normalize(normalMatrix * normal);`
     );
 
-    // ФРАГМЕНТ
+    // FRAGMENT
     shader.fragmentShader = `
       uniform float uEdgeIntensity;
       uniform float uEdgeWidth;
-      varying vec3 vWorldNormal;
+      varying vec3 vNormalView;
     ` + shader.fragmentShader;
 
-    // 🔴 ВАЖНО: вставляем ДО вывода цвета
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <dithering_fragment>',
+      '#include <output_fragment>',
       `
-      // EDGE HIGHLIGHT
-      vec3 dx = dFdx(vWorldNormal);
-      vec3 dy = dFdy(vWorldNormal);
-
-      float curvature = length(dx) + length(dy);
-
-      float edge = smoothstep(uEdgeWidth, uEdgeWidth * 3.0, curvature);
+      float fresnel = 1.0 - abs(dot(normalize(vNormalView), vec3(0.0, 0.0, 1.0)));
+      float edge = smoothstep(uEdgeWidth, 1.0, fresnel);
       edge *= uEdgeIntensity;
 
-      gl_FragColor.rgb += edge;
+      #include <output_fragment>
 
-      #include <dithering_fragment>
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), edge);
       `
     );
   };
