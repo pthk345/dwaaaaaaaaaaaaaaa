@@ -602,48 +602,45 @@ function loadTextureOnce(url) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════
-// EDGE HIGHLIGHT (Curvature) via onBeforeCompile
-// Detects low-poly geometry edges using screen-space normal derivatives
-// (dFdx/dFdy) and brightens them — creates the "cavity/ridge" look
-// seen in Blender's solid viewport mode.
-// ═══════════════════════════════════════════════════════════════════════
-function _applyEdgeHL(mat) {
-  if (!mat || mat._ehl) return;
-  mat._ehl = true;
-
-  mat.onBeforeCompile = function(shader) {
-    // 1. Expose world-space normal as varying
-    shader.vertexShader = 'varying vec3 _vWN;\n' + shader.vertexShader;
+// ══ EDGE HIGHLIGHT ══════════════════════════════════════════════
+// Patched onto every MeshLambertMaterial at GLB load time.
+// Uses screen-space derivatives of the world normal to detect
+// low-poly edge boundaries and brightens them.
+// ════════════════════════════════════════════════════════════════
+function _applyEdgeHighlight(mat) {
+  if (!mat || mat._edgePatched) return;
+  mat._edgePatched = true;
+  mat.onBeforeCompile = (shader) => {
+    // Expose world-space normal to fragment shader
     shader.vertexShader = shader.vertexShader.replace(
       '#include <worldpos_vertex>',
       `#include <worldpos_vertex>
-_vWN = normalize(vec3(
-  dot(vec3(modelMatrix[0].x, modelMatrix[1].x, modelMatrix[2].x), objectNormal),
-  dot(vec3(modelMatrix[0].y, modelMatrix[1].y, modelMatrix[2].y), objectNormal),
-  dot(vec3(modelMatrix[0].z, modelMatrix[1].z, modelMatrix[2].z), objectNormal)
-));`
+vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
     );
+    shader.vertexShader = 'varying vec3 vWorldNormal;\n' + shader.vertexShader;
+    shader.fragmentShader = 'varying vec3 vWorldNormal;\n' + shader.fragmentShader;
 
-    // 2. In fragment: compute edge magnitude from normal derivatives
-    shader.fragmentShader = 'varying vec3 _vWN;\n' + shader.fragmentShader;
+    // Inject uniforms and edge-highlight at the END of fragment main
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <premultiplied_alpha_fragment>',
-      `// Edge highlight: dFdx/dFdy of world normal = edge sharpness
+      '#include <output_fragment>',
+      `#include <output_fragment>
+// Edge highlight: screen-space normal derivative detects geometric edges
 {
-  float _em = length(dFdx(_vWN)) + length(dFdy(_vWN));
-  // smoothstep: below 0.06 = flat face (no highlight), above 0.8 = sharp edge (full)
-  float _es = smoothstep(0.06, 0.80, _em * 8.0);
-  // Additive brightening: boost RGB + small white fill
-  gl_FragColor.rgb = clamp(gl_FragColor.rgb + gl_FragColor.rgb * _es * 0.8 + vec3(_es * 0.06), 0.0, 1.0);
+  vec3 ddx = dFdx(vWorldNormal);
+  vec3 ddy = dFdy(vWorldNormal);
+  float edgeMag = length(ddx) + length(ddy);
+  // edgeMag large = steep normal change = polygon edge
+  // Soft threshold — remap to 0..1 highlight strength
+  float edgeStrength = smoothstep(0.15, 1.2, edgeMag * 6.0);
+  // Brighten towards white, preserving hue
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, min(gl_FragColor.rgb * 2.2 + 0.12, vec3(1.0)), edgeStrength * 0.55);
 }
-#include <premultiplied_alpha_fragment>`
+`
     );
   };
   mat.needsUpdate = true;
 }
-// ═══════════════════════════════════════════════════════════════════════
-
+// ════════════════════════════════════════════════════════════════
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -737,7 +734,7 @@ class GLBLoader {
     if (gltf.materials) {
       for (const mat of gltf.materials) {
         const m = new THREE.MeshLambertMaterial();
-        _applyEdgeHL(m);
+        _applyEdgeHighlight(m);
         if (mat.pbrMetallicRoughness) {
           const pbr = mat.pbrMetallicRoughness;
           if (pbr.baseColorTexture !== undefined && textures[pbr.baseColorTexture.index]) {
@@ -780,7 +777,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : (function(){ var _m = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHL(_m); return _m; }());
+          : (() => { const _fm = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHighlight(_fm); return _fm; })();
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -1092,6 +1089,145 @@ function initThree() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.85;
   renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
+
+  // ══ CAVITY POST-PROCESS SETUP ════════════════════════════════
+  // Порт алгоритма из cavifree (Unity URP/HDRP) на Three.js r128
+  // Три прохода: normal → color → cavity composite
+  {
+    const W = window.innerWidth, H = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const rtOpts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+                     format: THREE.RGBAFormat, type: THREE.UnsignedByteType };
+
+    // Буфер для цвета сцены
+    window._caviColorRT = new THREE.WebGLRenderTarget(W * dpr, H * dpr, rtOpts);
+    // Буфер для нормалей сцены
+    window._caviNormalRT = new THREE.WebGLRenderTarget(W * dpr, H * dpr, {
+      ...rtOpts, type: THREE.UnsignedByteType });
+
+    // MeshNormalMaterial — для normal pass
+    window._caviNormalMat = new THREE.MeshNormalMaterial({ side: THREE.FrontSide });
+
+    // ── Fullscreen quad с cavity GLSL шейдером ──
+    const caviVert = `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
+    `;
+    // Алгоритм портирован из GetAverageCurvature.hlsl (cavifree MIT):
+    // - сэмплируем нормали в 4 соседних пикселях
+    // - считаем divergence нормалей → curvature [0..1], 0.5 = flat
+    // - soft-light blend с цветом сцены
+    const caviFrag = `
+      precision highp float;
+      uniform sampler2D uColor;
+      uniform sampler2D uNormal;
+      uniform vec2      uResolution;
+      uniform float     uIntensity;       // сила эффекта (default 1.0)
+      uniform float     uAngleSensitivity;// чувствительность к углу (default 2.5)
+      uniform float     uEdgeMult;        // множитель рёбер (default 0.6)
+      uniform int       uRadius;          // радиус сэмплирования (default 1)
+      uniform float     uSharpness;       // вес центрального пикселя (default 0.9)
+      varying vec2 vUv;
+
+      // Читаем нормаль из буфера (RGB → -1..1 xyz)
+      vec2 sampleNormal(vec2 uv) {
+        vec3 n = texture2D(uNormal, uv).rgb * 2.0 - 1.0;
+        return n.xy; // view-space аппроксимация через xy компоненты
+      }
+
+      float calcCurvature(vec2 left, vec2 right, vec2 down, vec2 up) {
+        float rx = left.x - right.x;
+        float ry = up.y - down.y;
+        float total = rx + ry;
+        // Порт формулы из HLSL: curvature = 0.5 + sign(t)*pow(|t*mult|, exp)
+        float curvature = 0.5 + sign(total) * pow(abs(total * uEdgeMult), uAngleSensitivity);
+        return clamp(curvature, 0.0, 1.0);
+      }
+
+      float getCurvatureAt(vec2 uv) {
+        vec2 px = 1.0 / uResolution;
+        vec2 left  = sampleNormal(uv + vec2( px.x, 0.0));
+        vec2 right = sampleNormal(uv + vec2(-px.x, 0.0));
+        vec2 down  = sampleNormal(uv + vec2(0.0, -px.y));
+        vec2 up    = sampleNormal(uv + vec2(0.0,  px.y));
+        return calcCurvature(left, right, down, up);
+      }
+
+      void main() {
+        vec4 color = texture2D(uColor, vUv);
+
+        // Среднее кривизны в радиусе uRadius (порт GetAverageCurvature)
+        float sharpness = clamp(1.0 - uSharpness, 0.0001, 1.0);
+        float totalWeight = 0.0;
+        float curvature = 0.0;
+        vec2 px = 1.0 / uResolution;
+
+        // Radius 1 = 3x3 kernel (баланс качество/перф на мобильных)
+        for (int i = -1; i <= 1; i++) {
+          for (int j = -1; j <= 1; j++) {
+            vec2 offset = vec2(float(i), float(j));
+            float d = dot(offset, offset);
+            float weight = 1.0 / (d + sharpness);
+            totalWeight += weight;
+            curvature += weight * getCurvatureAt(vUv + offset * px);
+          }
+        }
+        curvature /= totalWeight;
+
+        // Soft-light blend: curvature 0..1, 0.5=flat, <0.5=cavity(тёмно), >0.5=edge(светло)
+        // Soft Light формула: 2*a*b + a^2*(1-2*b) для тёмного, 2*a*(1-b)+sqrt(a)*(2*b-1) для светлого
+        vec3 c = color.rgb;
+        float curv = (curvature - 0.5) * 2.0 * uIntensity; // -1..+1 с учётом intensity
+        vec3 result;
+        if (curv < 0.0) {
+          // Cavity: затемнение рёбер/впадин
+          result = c + c * curv * 0.5;
+        } else {
+          // Edge: осветление выпуклостей
+          result = c + (1.0 - c) * curv * 0.3;
+        }
+
+        gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+      }
+    `;
+
+    const caviQuadGeo  = new THREE.PlaneGeometry(2, 2);
+    const caviQuadMat  = new THREE.ShaderMaterial({
+      vertexShader:   caviVert,
+      fragmentShader: caviFrag,
+      uniforms: {
+        uColor:           { value: window._caviColorRT.texture },
+        uNormal:          { value: window._caviNormalRT.texture },
+        uResolution:      { value: new THREE.Vector2(W * dpr, H * dpr) },
+        uIntensity:       { value: 0.85  },  // сила cavity эффекта
+        uAngleSensitivity:{ value: 2.5   },  // чувствительность углов
+        uEdgeMult:        { value: 0.6   },  // множитель рёбер
+        uSharpness:       { value: 0.9   },  // важность центрального пикселя
+      },
+      depthTest:  false,
+      depthWrite: false,
+    });
+    const caviQuadMesh = new THREE.Mesh(caviQuadGeo, caviQuadMat);
+    caviQuadMesh.frustumCulled = false;
+    window._caviScene  = new THREE.Scene();
+    window._caviCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    window._caviScene.add(caviQuadMesh);
+    window._caviMat    = caviQuadMat;
+
+    // Вспомогательная функция: override материалов для normal pass
+    window._caviOverrideNormals = function(obj, enabled) {
+      obj.traverse(m => {
+        if (!m.isMesh) return;
+        if (enabled) {
+          if (!m._origMat) m._origMat = m.material;
+          m.material = window._caviNormalMat;
+        } else {
+          if (m._origMat) { m.material = m._origMat; delete m._origMat; }
+        }
+      });
+    };
+  }
+  // ═════════════════════════════════════════════════════════════
   
   scene = new THREE.Scene();
   // Небо загружается ниже через TextureLoader
@@ -1147,17 +1283,26 @@ function initThree() {
 
   // Tight frustum = максимальный texel density без увеличения mapSize
   // Остров 20 тайлов = 20 units + небольшой запас по краям
-    sunLight.shadow.mapSize.width  = 4096;
-  sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near =  2;
-  sunLight.shadow.camera.far  = 80;
-  sunLight.shadow.camera.left   = -21;
-  sunLight.shadow.camera.right  =  21;
-  sunLight.shadow.camera.top    =  21;
-  sunLight.shadow.camera.bottom = -21;
-  sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  4;
+  sunLight.shadow.mapSize.width  = 2048;
+  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.camera.near =  5;   // убираем пустой воздух — лучше depth precision
+  sunLight.shadow.camera.far  = 55;
+  sunLight.shadow.camera.left   = -14;
+  sunLight.shadow.camera.right  =  14;
+  sunLight.shadow.camera.top    =  14;
+  sunLight.shadow.camera.bottom = -14;
+
+  // Slope-scale bias по формуле из learnopengl:
+  // texelSize = frustumWidth / mapSize = 28 / 2048 = 0.01367 world units
+  // bias нужен >= нескольких texel в пространстве глубины
+  // bias = -(texelSize / depthRange) * slopeFactor = -(0.01367/50)*3 ≈ -0.00082
+  // Берём -0.0015 с запасом чтобы убить acne на flat поверхностях (тайлы, дорога)
+  sunLight.shadow.bias       = -0.0015;
+  // normalBias сдвигает позицию вдоль нормали — убирает acne на наклонных (деревья, заборы)
+  // normalBias = 2 texela = 0.01367 * 2 = 0.027 → берём 0.04 с запасом
+  sunLight.shadow.normalBias =  0.04;
+  // radius 3-4: мягкие края без размытия самого shadowmap (12 = acne усиливается)
+  sunLight.shadow.radius     =  3;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1248,6 +1393,16 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 
+  // Ресайзим cavity render targets
+  if (window._caviColorRT && window._caviNormalRT) {
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const W = window.innerWidth * dpr, H = window.innerHeight * dpr;
+    window._caviColorRT.setSize(W, H);
+    window._caviNormalRT.setSize(W, H);
+    if (window._caviMat) {
+      window._caviMat.uniforms.uResolution.value.set(W, H);
+    }
+  }
 }
 
 // ============================================================
@@ -1371,7 +1526,7 @@ function buildMap(g, customCellData) {
       const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-          (function(){ var _m2 = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHL(_m2); return _m2; }()));
+          (() => { const _bm = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHighlight(_bm); return _bm; })())
     }
     scaleTo(obj,TILE_SIZE);
     obj.rotation.y=rot;
@@ -1799,7 +1954,7 @@ function rebuildEditorCell(r, c) {
   let obj = assets.clone(key);
   if(!obj) {
     obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-      new THREE.MeshLambertMaterial({color:0x888888}));
+      (() => { const _em = new THREE.MeshLambertMaterial({color:0x888888}); _applyEdgeHighlight(_em); return _em; })());
   }
   scaleTo(obj, TILE_SIZE);
   obj.rotation.y = rot;
@@ -2726,7 +2881,7 @@ function gameLoop(ts) {
 
 
   if (gameState !== 'playing') {
-    renderer.render(scene, camera);
+    _caviRender();
     return;
   }
   
@@ -2737,8 +2892,36 @@ function gameLoop(ts) {
   updateWaveSpawner(dt);
   checkWaveComplete();
   
-  renderer.render(scene, camera);
+  _caviRender();
 }
+
+// ── Cavity 3-pass рендер ──────────────────────────────────────
+function _caviRender() {
+  if (!window._caviColorRT || !window._caviNormalRT) {
+    renderer.render(scene, camera);
+    return;
+  }
+
+  // Pass 1: рендер цвета в RT
+  renderer.setRenderTarget(window._caviColorRT);
+  renderer.render(scene, camera);
+
+  // Pass 2: normal pass — временно меняем материалы на MeshNormalMaterial
+  // Скрываем sky background на время normal pass (он не имеет нормалей)
+  const savedBg = scene.background;
+  scene.background = null;
+  renderer.setClearColor(0x8080ff, 1); // нейтральная нормаль (0,0,1) = rgb(0.5,0.5,1)
+  window._caviOverrideNormals(scene, true);
+  renderer.setRenderTarget(window._caviNormalRT);
+  renderer.render(scene, camera);
+  window._caviOverrideNormals(scene, false);
+  scene.background = savedBg;
+
+  // Pass 3: cavity composite на экран
+  renderer.setRenderTarget(null);
+  renderer.render(window._caviScene, window._caviCamera);
+}
+// ─────────────────────────────────────────────────────────────
 
 function updateEnemies(dt) {
   for (const enemy of enemies) {
