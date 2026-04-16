@@ -584,6 +584,7 @@ function updateProgress(pct, label) {
 
 updateProgress(5, 'Loading Three.js...');
 await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+
 updateProgress(15, 'Loading loaders...');
 
 // GLB Loader with external texture support (Kenney colormap.png)
@@ -1061,6 +1062,29 @@ function initThree() {
   const canvas = document.getElementById('canvas');
   
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, stencil: true });
+// POST PROCESSING
+const composer = new THREE.EffectComposer(renderer);
+
+const renderPass = new THREE.RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const outlinePass = new THREE.OutlinePass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  scene,
+  camera
+);
+
+// настройки (можешь менять)
+outlinePass.edgeStrength = 3.0;
+outlinePass.edgeGlow = 0.3;
+outlinePass.edgeThickness = 1.5;
+outlinePass.visibleEdgeColor.set('#ffffff');
+outlinePass.hiddenEdgeColor.set('#ffffff');
+
+composer.addPass(outlinePass);
+
+// выделяем ВСЮ сцену
+outlinePass.selectedObjects = scene.children;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -2712,7 +2736,7 @@ function gameLoop(ts) {
 
 
   if (gameState !== 'playing') {
-    renderer.render(scene, camera);
+    composer.render();
     return;
   }
   
