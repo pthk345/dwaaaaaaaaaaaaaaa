@@ -1043,7 +1043,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.85;
@@ -1107,10 +1107,10 @@ function initThree() {
   sunLight.shadow.camera.near = 0.5;
   sunLight.shadow.camera.far  = 80;
   // Охватываем весь остров 20x20 тайлов
-  sunLight.shadow.camera.left   = -25;
-  sunLight.shadow.camera.right  =  25;
-  sunLight.shadow.camera.top    =  25;
-  sunLight.shadow.camera.bottom = -25;
+  sunLight.shadow.camera.left   = -15;
+  sunLight.shadow.camera.right  =  15;
+  sunLight.shadow.camera.top    =  15;
+  sunLight.shadow.camera.bottom = -15;
 
   // Ключевые параметры мягких теней без полос:
   // bias: небольшой отрицательный убирает shadow acne
@@ -1118,7 +1118,7 @@ function initThree() {
   // radius: размытие PCF — чем больше тем мягче тень
   sunLight.shadow.bias       = -0.0003;
   sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  12;
+  sunLight.shadow.radius     =  4;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -2288,9 +2288,9 @@ function placeTower(row, col, def) {
       const ts = new THREE.Vector3();
       tb.getSize(ts);
       const tm = Math.max(ts.x, ts.y, ts.z);
-      if (tm > 0) { const sc = 0.79 / tm; turretModel.scale.set(sc, sc, sc); }
+      if (tm > 0) { const sc = 0.95 / tm; turretModel.scale.set(sc, sc, sc); }
       // Поднимаем высоко над основанием башни
-      turretModel.position.set(0, 0.70, 0);
+      turretModel.position.set(0, 0.90, 0);
       turretModel.traverse(m => { if(m.isMesh) m.castShadow = true; });
       turretModel.userData.isLightningTurret = true;
       model.add(turretModel); // дочерний объект — двигается вместе с башней
