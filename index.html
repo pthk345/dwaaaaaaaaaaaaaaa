@@ -601,6 +601,46 @@ function loadTextureOnce(url) {
   return tex;
 }
 
+
+// ══ EDGE HIGHLIGHT ══════════════════════════════════════════════
+// Patched onto every MeshLambertMaterial at GLB load time.
+// Uses screen-space derivatives of the world normal to detect
+// low-poly edge boundaries and brightens them.
+// ════════════════════════════════════════════════════════════════
+function _applyEdgeHighlight(mat) {
+  if (!mat || mat._edgePatched) return;
+  mat._edgePatched = true;
+  mat.onBeforeCompile = (shader) => {
+    // Expose world-space normal to fragment shader
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <worldpos_vertex>',
+      `#include <worldpos_vertex>
+vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+    );
+    shader.vertexShader = 'varying vec3 vWorldNormal;\n' + shader.vertexShader;
+    shader.fragmentShader = 'varying vec3 vWorldNormal;\n' + shader.fragmentShader;
+
+    // Inject uniforms and edge-highlight at the END of fragment main
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <output_fragment>',
+      `#include <output_fragment>
+// Edge highlight: screen-space normal derivative detects geometric edges
+{
+  vec3 ddx = dFdx(vWorldNormal);
+  vec3 ddy = dFdy(vWorldNormal);
+  float edgeMag = length(ddx) + length(ddy);
+  // edgeMag large = steep normal change = polygon edge
+  // Soft threshold — remap to 0..1 highlight strength
+  float edgeStrength = smoothstep(0.15, 1.2, edgeMag * 6.0);
+  // Brighten towards white, preserving hue
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, min(gl_FragColor.rgb * 2.2 + 0.12, vec3(1.0)), edgeStrength * 0.55);
+}
+`
+    );
+  };
+  mat.needsUpdate = true;
+}
+// ════════════════════════════════════════════════════════════════
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -694,6 +734,7 @@ class GLBLoader {
     if (gltf.materials) {
       for (const mat of gltf.materials) {
         const m = new THREE.MeshLambertMaterial();
+        _applyEdgeHighlight(m);
         if (mat.pbrMetallicRoughness) {
           const pbr = mat.pbrMetallicRoughness;
           if (pbr.baseColorTexture !== undefined && textures[pbr.baseColorTexture.index]) {
@@ -736,7 +777,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : new THREE.MeshLambertMaterial({ color: 0x88aa88 });
+          : (() => { const _fm = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHighlight(_fm); return _fm; })();
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -1043,7 +1084,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.VSMShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.85;
@@ -1101,24 +1142,28 @@ function initThree() {
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
-  sunLight.shadow.mapSize.width  = 4096;
-  sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near = 0.5;
-  sunLight.shadow.camera.far  = 80;
-  // Охватываем весь остров 20x20 тайлов
-  sunLight.shadow.camera.left   = -15;
-  sunLight.shadow.camera.right  =  15;
-  sunLight.shadow.camera.top    =  15;
-  sunLight.shadow.camera.bottom = -15;
+  // Tight frustum = максимальный texel density без увеличения mapSize
+  // Остров 20 тайлов = 20 units + небольшой запас по краям
+  sunLight.shadow.mapSize.width  = 2048;
+  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.camera.near =  5;   // убираем пустой воздух — лучше depth precision
+  sunLight.shadow.camera.far  = 55;
+  sunLight.shadow.camera.left   = -14;
+  sunLight.shadow.camera.right  =  14;
+  sunLight.shadow.camera.top    =  14;
+  sunLight.shadow.camera.bottom = -14;
 
-  // Ключевые параметры мягких теней без полос:
-  // bias: небольшой отрицательный убирает shadow acne
-  // normalBias: компенсирует артефакты на наклонных поверхностях
-  // radius: размытие PCF — чем больше тем мягче тень
-  sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  4;
+  // Slope-scale bias по формуле из learnopengl:
+  // texelSize = frustumWidth / mapSize = 28 / 2048 = 0.01367 world units
+  // bias нужен >= нескольких texel в пространстве глубины
+  // bias = -(texelSize / depthRange) * slopeFactor = -(0.01367/50)*3 ≈ -0.00082
+  // Берём -0.0015 с запасом чтобы убить acne на flat поверхностях (тайлы, дорога)
+  sunLight.shadow.bias       = -0.0015;
+  // normalBias сдвигает позицию вдоль нормали — убирает acne на наклонных (деревья, заборы)
+  // normalBias = 2 texela = 0.01367 * 2 = 0.027 → берём 0.04 с запасом
+  sunLight.shadow.normalBias =  0.04;
+  // radius 3-4: мягкие края без размытия самого shadowmap (12 = acne усиливается)
+  sunLight.shadow.radius     =  3;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1332,7 +1377,7 @@ function buildMap(g, customCellData) {
       const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-          new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}));
+          (() => { const _bm = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHighlight(_bm); return _bm; })())
     }
     scaleTo(obj,TILE_SIZE);
     obj.rotation.y=rot;
@@ -1760,7 +1805,7 @@ function rebuildEditorCell(r, c) {
   let obj = assets.clone(key);
   if(!obj) {
     obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-      new THREE.MeshLambertMaterial({color:0x888888}));
+      (() => { const _em = new THREE.MeshLambertMaterial({color:0x888888}); _applyEdgeHighlight(_em); return _em; })());
   }
   scaleTo(obj, TILE_SIZE);
   obj.rotation.y = rot;
