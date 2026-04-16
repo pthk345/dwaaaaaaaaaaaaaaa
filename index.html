@@ -1,4 +1,205 @@
 <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tower Defense 3D</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap');
+
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+:root{
+--safe-b: env(safe-area-inset-bottom, 0px);
+}
+.outlined {
+color: #fff;
+-webkit-text-stroke: 5px #000;
+paint-order: stroke fill;
+font-weight: 900;
+font-family: 'Nunito', system-ui, sans-serif;
+line-height: 1;
+}
+
+/* MOB ANIMATIONS */
+.mob {
+  position: absolute;
+  transition: transform 0.3s cubic-bezier(.42,0,.58,1), filter 0.2s, opacity 0.2s;
+  will-change: transform, filter, opacity;
+  z-index: 2;
+}
+@keyframes mob-walk {
+  0%   { transform: scaleY(1) translateY(0px);}
+  12%  { transform: scaleY(1.08) translateY(-3px);}
+  20%  { transform: scaleY(.95) translateY(1px);}
+  28%  { transform: scaleY(1.03) translateY(-2px);}
+  36%  { transform: scaleY(1) translateY(0px);}
+  55%  { transform: scaleY(.98) translateY(2px);}
+  67%  { transform: scaleY(1.04) translateY(-2px);}
+  100% { transform: scaleY(1) translateY(0px);}
+}
+.mob.mob-walking {
+  animation: mob-walk 0.55s infinite linear;
+}
+@keyframes mob-damage {
+  0% { filter: brightness(1) drop-shadow(0 0 5px #ffd9d9);}
+  15% { filter: brightness(2) drop-shadow(0 0 8px #ff4545);}
+  32% { filter: brightness(.9) drop-shadow(0 0 4px #fff);}
+  100% { filter: brightness(1);}
+}
+.mob.mob-damaged {
+  animation: mob-damage 0.23s linear;
+}
+@keyframes mob-die {
+  0% { opacity:1; transform: scaleY(1) translateY(0);}
+  30% { opacity:.7; filter: blur(0.5px);}
+  70% { opacity:.3; transform: scaleY(.8) translateY(12px);}
+  100% { opacity:0; transform: scaleY(.6) translateY(40px);}
+}
+.mob.mob-dying {
+  animation: mob-die 0.36s forwards;
+}
+
+/* МАЛЬЧИК ~10 лет с писюном - СТИЛИ */
+.boy10 {
+  position: absolute;
+  left: 180px;
+  top: 210px;
+  z-index: 6;
+  width: 86px;
+  height: 170px;
+  pointer-events: none;
+}
+.boy10-head {
+  position: absolute;
+  left: 17px;
+  top: 0;
+  width: 54px;
+  height: 51px;
+  background: #ffe2a0;
+  border-radius: 40px 40px 48px 45px/38px 38px 38px 38px;
+  border: 2.2px solid #a07b51;
+  z-index: 3;
+}
+.boy10-hair {
+  position: absolute;
+  left: 17px;
+  top: 0;
+  width: 54px;
+  height: 20px;
+  background: #7d4a19;
+  border-radius: 24px 36px 28px 40px/26px 11px 15px 18px;
+  z-index: 4;
+}
+.boy10-eye {
+  position: absolute;
+  width: 8px;
+  height: 10px;
+  background: #292929;
+  border-radius: 50%;
+  top: 22px;
+}
+.boy10-eye.left { left: 32px; }
+.boy10-eye.right { left: 48px; }
+.boy10-body {
+  position: absolute;
+  left: 28px;
+  top: 45px;
+  width: 30px;
+  height: 67px;
+  background: linear-gradient(#90caf9 55%, #ffe2a0 45%);
+  border-radius: 16px 16px 22px 22px/16px 22px 30px 24px;
+  border: 2.2px solid #a07b51;
+  z-index: 2;
+}
+.boy10-arm-left,
+.boy10-arm-right {
+  position: absolute;
+  top: 58px;
+  width: 11px;
+  height: 38px;
+  background: #ffe2a0;
+  border-radius: 7px 7px 18px 18px/8px 10px 18px 13px;
+  border: 2.2px solid #a07b51;
+}
+.boy10-arm-left { left: 6px; transform: rotate(-17deg);}
+.boy10-arm-right { left: 64px; transform: rotate(18deg);}
+.boy10-leg-left,
+.boy10-leg-right {
+  position: absolute;
+  top: 107px;
+  width: 13px;
+  height: 48px;
+  background: #ffe2a0;
+  border-radius: 9px 11px 30px 20px/14px 9px 32px 19px;
+  border: 2.2px solid #a07b51;
+}
+.boy10-leg-left { left: 17px; }
+.boy10-leg-right { left: 54px; }
+.boy10-penis {
+  position: absolute;
+  left: 39px;
+  top: 101px;
+  width: 12px;
+  height: 29px;
+  background: #eed0a2;
+  border-radius: 7px 7px 14px 15px/6px 13px 15px 12px;
+  border: 2px solid #a07b51;
+  z-index: 5;
+  box-shadow: 0 0 3px 2px #e7cea269;
+}
+.boy10-penis-head {
+  position: absolute;
+  left: 0px;
+  top: 18px;
+  width: 12px;
+  height: 11px;
+  background: #eabee5;
+  border-radius: 7px 7px 13px 14px/6px 9px 8px 10px;
+  border: 2px solid #a07b51;
+  z-index: 7;
+}
+body{
+background:#87ceeb; 
+overflow:hidden;
+font-family:'Nunito','SF Pro Rounded',system-ui,sans-serif;
+color:#fff;
+touch-action:none;
+}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
+.screen.hidden{display:none;}
+#loading-screen{background:linear-gradient(180deg,#a8e6ff 0%,#d4f5ff 100%);}
+#loading-screen .loader-title{font-size:1.6rem;font-weight:900;color:#fff;-webkit-text-stroke:4px #000;paint-order:stroke fill;text-shadow:none;margin-bottom:1.4rem;}
+.progress-bar{width:min(260px,70vw);height:10px;background:rgba(255,255,255,.4);border-radius:20px;overflow:hidden;border:2px solid #fff;}
+.progress-fill{height:100%;background:#f5a623;border-radius:20px;transition:width .3s;}
+.progress-label{font-size:.75rem;color:rgba(255,255,255,.8);margin-top:7px;font-weight:700;}
+#main-menu{background:linear-gradient(180deg,#a8e6ff 0%,#c5f0ff 100%);}
+#main-menu .logo{font-size:clamp(2.4rem,10vw,3.6rem);font-weight:900;color:#fff;-webkit-text-stroke:4px #000;paint-order:stroke fill;text-shadow:none;margin-bottom:.3rem;letter-spacing:-.01em;}
+#main-menu .subtitle{font-size:.85rem;color:rgba(255,255,255,.85);font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:2.5rem;}
+.menu-btn{
+display:flex;align-items:center;justify-content:center;gap:10px;
+width:min(240px,72vw);padding:.9rem 1.6rem;margin:.35rem 0;
+border:3px solid #000;background:#fff;color:#222;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<!-- Мальчик ~10 лет с писюном -->
+<div class="boy10">
+  <div class="boy10-head"></div>
+  <div class="boy10-hair"></div>
+  <div class="boy10-eye left"></div>
+  <div class="boy10-eye right"></div>
+  <div class="boy10-body"></div>
+  <div class="boy10-arm-left"></div>
+  <div class="boy10-arm-right"></div>
+  <div class="boy10-leg-left"></div>
+  <div class="boy10-leg-right"></div>
+  <div class="boy10-penis">
+    <div class="boy10-penis-head"></div>
+  </div>
+</div>
 
 <html lang="en">
 <head>
