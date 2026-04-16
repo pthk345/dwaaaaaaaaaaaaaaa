@@ -611,42 +611,12 @@ function _applyEdgeHighlight(mat) {
   if (!mat || mat._edgePatched) return;
   mat._edgePatched = true;
 
-  mat.onBeforeCompile = (shader) => {
+  // 🔥 ВКЛЮЧАЕМ LOW POLY
+  mat.flatShading = true;
 
-    shader.uniforms.uEdgeIntensity = { value: 1.5 };
-    shader.uniforms.uEdgeWidth = { value: 0.6 };
-
-    // VERTEX
-    shader.vertexShader = `
-      varying vec3 vNormalView;
-    ` + shader.vertexShader;
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <beginnormal_vertex>',
-      `#include <beginnormal_vertex>
-       vNormalView = normalize(normalMatrix * normal);`
-    );
-
-    // FRAGMENT
-    shader.fragmentShader = `
-      uniform float uEdgeIntensity;
-      uniform float uEdgeWidth;
-      varying vec3 vNormalView;
-    ` + shader.fragmentShader;
-
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <output_fragment>',
-      `
-      float fresnel = 1.0 - abs(dot(normalize(vNormalView), vec3(0.0, 0.0, 1.0)));
-      float edge = smoothstep(uEdgeWidth, 1.0, fresnel);
-      edge *= uEdgeIntensity;
-
-      #include <output_fragment>
-
-      gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), edge);
-      `
-    );
-  };
+  // 🔥 ДЕЛАЕМ СВЕТ ЯРЧЕ ПО ГРАНЯМ
+  mat.emissive = new THREE.Color(0xffffff);
+  mat.emissiveIntensity = 0.15;
 
   mat.needsUpdate = true;
 }
