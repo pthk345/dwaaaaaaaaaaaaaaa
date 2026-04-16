@@ -602,115 +602,48 @@ function loadTextureOnce(url) {
 }
 
 
-// ══ EDGE HIGHLIGHT ══════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════
-// EDGE HIGHLIGHT / CURVATURE — Blender Cavity стиль
-//
-// Алгоритм:
-//   1. Передаём world-normal в фрагментный шейдер
-//   2. В фрагменте вычисляем fwidth(normal) — скорость изменения нормали
-//      в экранном пространстве. На гранях low-poly нормаль резко меняется
-//      между соседними треугольниками → fwidth большой
-//   3. Из этой величины делаем две компоненты:
-//      • HIGHLIGHT (Ridge) — осветляем острые рёбра
-//      • CAVITY (Valley)   — затемняем впадины/углы (как AO)
-//   4. Параметры: edgeWidth, ridgeStrength, valleyStrength
-// ════════════════════════════════════════════════════════════════
-// Глобальные параметры — можно менять в рантайме
-window._edgeParams = {
-  edgeWidth:      5.0,   // Ширина полосы подсветки (множитель fwidth)
-  ridgeStrength:  0.72,  // Яркость граней (0=нет, 1=максимум)
-  valleyStrength: 0.38,  // Затемнение впадин (cavity AO)
-  enabled:        true,
-};
+// ═══════════════════════════════════════════════════════════════════════
+// EDGE HIGHLIGHT (Curvature) via onBeforeCompile
+// Detects low-poly geometry edges using screen-space normal derivatives
+// (dFdx/dFdy) and brightens them — creates the "cavity/ridge" look
+// seen in Blender's solid viewport mode.
+// ═══════════════════════════════════════════════════════════════════════
+function _applyEdgeHL(mat) {
+  if (!mat || mat._ehl) return;
+  mat._ehl = true;
 
-function _applyEdgeHighlight(mat) {
-  if (!mat || mat._edgePatched) return;
-  mat._edgePatched = true;
-
-  mat.onBeforeCompile = (shader) => {
-    // ── Uniforms ──────────────────────────────────────────────
-    shader.uniforms.uEdgeWidth      = { value: window._edgeParams.edgeWidth };
-    shader.uniforms.uRidgeStrength  = { value: window._edgeParams.ridgeStrength };
-    shader.uniforms.uValleyStrength = { value: window._edgeParams.valleyStrength };
-    shader.uniforms.uEdgeEnabled    = { value: window._edgeParams.enabled ? 1.0 : 0.0 };
-
-    // ── Vertex: передаём world-normal и view-normal ───────────
-    shader.vertexShader = `
-varying vec3 vWNormal;
-varying vec3 vVNormal;
-` + shader.vertexShader;
-
+  mat.onBeforeCompile = function(shader) {
+    // 1. Expose world-space normal as varying
+    shader.vertexShader = 'varying vec3 _vWN;\n' + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       '#include <worldpos_vertex>',
       `#include <worldpos_vertex>
-// World normal (для cavity по направлению к свету)
-vWNormal = normalize(mat3(modelMatrix) * objectNormal);
-// View-space normal (для curvature независимо от камеры)
-vVNormal = normalize(normalMatrix * objectNormal);`
+_vWN = normalize(vec3(
+  dot(vec3(modelMatrix[0].x, modelMatrix[1].x, modelMatrix[2].x), objectNormal),
+  dot(vec3(modelMatrix[0].y, modelMatrix[1].y, modelMatrix[2].y), objectNormal),
+  dot(vec3(modelMatrix[0].z, modelMatrix[1].z, modelMatrix[2].z), objectNormal)
+));`
     );
 
-    // ── Fragment: вставляем uniforms и логику ─────────────────
-    shader.fragmentShader = `
-varying vec3 vWNormal;
-varying vec3 vVNormal;
-uniform float uEdgeWidth;
-uniform float uRidgeStrength;
-uniform float uValleyStrength;
-uniform float uEdgeEnabled;
-` + shader.fragmentShader;
-
+    // 2. In fragment: compute edge magnitude from normal derivatives
+    shader.fragmentShader = 'varying vec3 _vWN;\n' + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <output_fragment>',
-      `#include <output_fragment>
-
-if (uEdgeEnabled > 0.5) {
-  // ── Curvature из screen-space производных нормали ───────
-  // fwidth = |dFdx| + |dFdy| — суммарное изменение нормали
-  // в пределах одного пикселя экрана
-  vec3 dNx = dFdx(vVNormal);
-  vec3 dNy = dFdy(vVNormal);
-
-  // Скалярная величина кривизны
-  float curvature = length(dNx) + length(dNy);
-
-  // ── RIDGE (Edge Highlight) ───────────────────────────────
-  // Нормируем под ширину полосы: узкая полоса = высокий порог
-  // smoothstep: 0 = плавное начало, 1 = насыщение
-  float ridgeFactor = smoothstep(
-    0.0,
-    1.0 / max(uEdgeWidth, 0.1),
-    curvature * uEdgeWidth
-  );
-
-  // Осветление: смешиваем к более яркому варианту того же цвета
-  // Не уходим в белый — сохраняем хроматичность
-  vec3 brightColor = gl_FragColor.rgb + gl_FragColor.rgb * 0.8 + vec3(0.08);
-  brightColor = min(brightColor, vec3(1.0));
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, brightColor, ridgeFactor * uRidgeStrength);
-
-  // ── VALLEY (Cavity / AO-подобное затемнение) ─────────────
-  // Смягчённый порог — cavity срабатывает при меньшей кривизне
-  float valleyFactor = smoothstep(
-    0.0,
-    0.6 / max(uEdgeWidth, 0.1),
-    curvature * uEdgeWidth * 0.5
-  );
-
-  // Затемняем — cavity как ambient occlusion в углах
-  // Умножаем на направление к «верху» (dot с world-up)
-  // чтобы снизу тени были глубже
-  float upDot = max(0.0, dot(vWNormal, vec3(0.0, 1.0, 0.0)));
-  float cavityDepth = mix(1.0, 0.7, valleyFactor * uValleyStrength * (1.0 - upDot * 0.4));
-  gl_FragColor.rgb *= cavityDepth;
+      '#include <premultiplied_alpha_fragment>',
+      `// Edge highlight: dFdx/dFdy of world normal = edge sharpness
+{
+  float _em = length(dFdx(_vWN)) + length(dFdy(_vWN));
+  // smoothstep: below 0.06 = flat face (no highlight), above 0.8 = sharp edge (full)
+  float _es = smoothstep(0.06, 0.80, _em * 8.0);
+  // Additive brightening: boost RGB + small white fill
+  gl_FragColor.rgb = clamp(gl_FragColor.rgb + gl_FragColor.rgb * _es * 0.8 + vec3(_es * 0.06), 0.0, 1.0);
 }
-`
+#include <premultiplied_alpha_fragment>`
     );
   };
-
   mat.needsUpdate = true;
 }
-// ════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -804,7 +737,7 @@ class GLBLoader {
     if (gltf.materials) {
       for (const mat of gltf.materials) {
         const m = new THREE.MeshLambertMaterial();
-        _applyEdgeHighlight(m);
+        _applyEdgeHL(m);
         if (mat.pbrMetallicRoughness) {
           const pbr = mat.pbrMetallicRoughness;
           if (pbr.baseColorTexture !== undefined && textures[pbr.baseColorTexture.index]) {
@@ -847,7 +780,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : (() => { const _fm = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHighlight(_fm); return _fm; })();
+          : (function(){ var _m = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHL(_m); return _m; }());
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -1214,26 +1147,17 @@ function initThree() {
 
   // Tight frustum = максимальный texel density без увеличения mapSize
   // Остров 20 тайлов = 20 units + небольшой запас по краям
-  sunLight.shadow.mapSize.width  = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near =  5;   // убираем пустой воздух — лучше depth precision
-  sunLight.shadow.camera.far  = 55;
-  sunLight.shadow.camera.left   = -14;
-  sunLight.shadow.camera.right  =  14;
-  sunLight.shadow.camera.top    =  14;
-  sunLight.shadow.camera.bottom = -14;
-
-  // Slope-scale bias по формуле из learnopengl:
-  // texelSize = frustumWidth / mapSize = 28 / 2048 = 0.01367 world units
-  // bias нужен >= нескольких texel в пространстве глубины
-  // bias = -(texelSize / depthRange) * slopeFactor = -(0.01367/50)*3 ≈ -0.00082
-  // Берём -0.0015 с запасом чтобы убить acne на flat поверхностях (тайлы, дорога)
-  sunLight.shadow.bias       = -0.0015;
-  // normalBias сдвигает позицию вдоль нормали — убирает acne на наклонных (деревья, заборы)
-  // normalBias = 2 texela = 0.01367 * 2 = 0.027 → берём 0.04 с запасом
-  sunLight.shadow.normalBias =  0.04;
-  // radius 3-4: мягкие края без размытия самого shadowmap (12 = acne усиливается)
-  sunLight.shadow.radius     =  3;
+    sunLight.shadow.mapSize.width  = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near =  2;
+  sunLight.shadow.camera.far  = 80;
+  sunLight.shadow.camera.left   = -21;
+  sunLight.shadow.camera.right  =  21;
+  sunLight.shadow.camera.top    =  21;
+  sunLight.shadow.camera.bottom = -21;
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  4;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1447,7 +1371,7 @@ function buildMap(g, customCellData) {
       const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-          (() => { const _bm = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHighlight(_bm); return _bm; })())
+          (function(){ var _m2 = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHL(_m2); return _m2; }()));
     }
     scaleTo(obj,TILE_SIZE);
     obj.rotation.y=rot;
@@ -1875,7 +1799,7 @@ function rebuildEditorCell(r, c) {
   let obj = assets.clone(key);
   if(!obj) {
     obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-      (() => { const _em = new THREE.MeshLambertMaterial({color:0x888888}); _applyEdgeHighlight(_em); return _em; })());
+      new THREE.MeshLambertMaterial({color:0x888888}));
   }
   scaleTo(obj, TILE_SIZE);
   obj.rotation.y = rot;
