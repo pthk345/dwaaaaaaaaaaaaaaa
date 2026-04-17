@@ -601,6 +601,70 @@ function loadTextureOnce(url) {
   return tex;
 }
 
+
+// ════════════════════════════════════════════════════════════════════
+// CAVITY SYSTEM — bakes curvature into vertex attribute at load time.
+// No screen-space, no pixelation, no postprocessing.
+// Each vertex gets a "cavity" value 0..1:
+//   0   = concave valley  → darken slightly
+//   0.5 = flat surface    → no change
+//   1   = convex ridge    → brighten slightly
+// ════════════════════════════════════════════════════════════════════
+function _bakeCavity(geo) {
+  const pos = geo.attributes.position;
+  const nor = geo.attributes.normal;
+  if (!pos || !nor) return;
+  const count = pos.count;
+  const cavity = new Float32Array(count);
+  const indices = geo.index ? geo.index.array : null;
+  const faceCount = indices ? Math.floor(indices.length / 3) : Math.floor(count / 3);
+  const faceNX = new Float32Array(count);
+  const faceNY = new Float32Array(count);
+  const faceNZ = new Float32Array(count);
+  const faceW  = new Uint32Array(count);
+  const ax=[], ay=[], az=[];
+  for (let i=0;i<count;i++){ax[i]=pos.getX(i);ay[i]=pos.getY(i);az[i]=pos.getZ(i);}
+  for (let f=0;f<faceCount;f++){
+    const a=indices?indices[f*3]:f*3, b=indices?indices[f*3+1]:f*3+1, c=indices?indices[f*3+2]:f*3+2;
+    const ex=ax[b]-ax[a], ey=ay[b]-ay[a], ez=az[b]-az[a];
+    const fx=ax[c]-ax[a], fy=ay[c]-ay[a], fz=az[c]-az[a];
+    let nx=ey*fz-ez*fy, ny=ez*fx-ex*fz, nz=ex*fy-ey*fx;
+    const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
+    nx/=nl;ny/=nl;nz/=nl;
+    for(const vi of [a,b,c]){faceNX[vi]+=nx;faceNY[vi]+=ny;faceNZ[vi]+=nz;faceW[vi]++;}
+  }
+  for(let i=0;i<count;i++){
+    const w=faceW[i]||1;
+    const fx=faceNX[i]/w, fy=faceNY[i]/w, fz=faceNZ[i]/w;
+    const fl=Math.sqrt(fx*fx+fy*fy+fz*fz)||1;
+    const nx=nor.getX(i), ny=nor.getY(i), nz=nor.getZ(i);
+    const dot=nx*(fx/fl)+ny*(fy/fl)+nz*(fz/fl);
+    // dot~1=flat, dot<1=edge. Map so ridge=high, valley=low
+    cavity[i]=Math.max(0,Math.min(1, 0.5+(1-dot)*0.55-0.05));
+  }
+  geo.setAttribute('aCavity',new THREE.BufferAttribute(cavity,1));
+}
+
+function _applyCavity(mat) {
+  if (!mat || mat._cav) return;
+  mat._cav = true;
+  mat.onBeforeCompile = function(shader) {
+    shader.vertexShader = 'attribute float aCavity;\nvarying float vCav;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvCav = aCavity;'
+    );
+    shader.fragmentShader = 'varying float vCav;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      '#include <dithering_fragment>\n{float r=smoothstep(0.52,1.0,vCav);float v=smoothstep(0.48,0.0,vCav);gl_FragColor.rgb=clamp(gl_FragColor.rgb*(1.0+r*0.28)*(1.0-v*0.18),0.0,1.0);}'
+    );
+  };
+  mat.needsUpdate = true;
+}
+// ════════════════════════════════════════════════════════════════════
+
+
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -694,6 +758,7 @@ class GLBLoader {
     if (gltf.materials) {
       for (const mat of gltf.materials) {
         const m = new THREE.MeshLambertMaterial();
+        _applyCavity(m);
         if (mat.pbrMetallicRoughness) {
           const pbr = mat.pbrMetallicRoughness;
           if (pbr.baseColorTexture !== undefined && textures[pbr.baseColorTexture.index]) {
@@ -736,7 +801,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : new THREE.MeshLambertMaterial({ color: 0x88aa88 });
+          : (function(){var _m=new THREE.MeshLambertMaterial({color:0x88aa88});_applyCavity(_m);return _m;}());
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -1101,24 +1166,19 @@ function initThree() {
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
+  // Tight frustum = максимальный texel density без увеличения mapSize
+  // Остров 20 тайлов = 20 units + небольшой запас по краям
   sunLight.shadow.mapSize.width  = 4096;
   sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near = 0.5;
+  sunLight.shadow.camera.near =  2;
   sunLight.shadow.camera.far  = 80;
-  // Охватываем весь остров 20x20 тайлов
-  sunLight.shadow.camera.left   = -25;
-  sunLight.shadow.camera.right  =  25;
-  sunLight.shadow.camera.top    =  25;
-  sunLight.shadow.camera.bottom = -25;
-
-  // Ключевые параметры мягких теней без полос:
-  // bias: небольшой отрицательный убирает shadow acne
-  // normalBias: компенсирует артефакты на наклонных поверхностях
-  // radius: размытие PCF — чем больше тем мягче тень
+  sunLight.shadow.camera.left   = -21;
+  sunLight.shadow.camera.right  =  21;
+  sunLight.shadow.camera.top    =  21;
+  sunLight.shadow.camera.bottom = -21;
   sunLight.shadow.bias       = -0.0003;
   sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  12;
+  sunLight.shadow.radius     =  4;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1208,7 +1268,6 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-
 }
 
 // ============================================================
@@ -1332,7 +1391,7 @@ function buildMap(g, customCellData) {
       const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-          new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}));
+          new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}))
     }
     scaleTo(obj,TILE_SIZE);
     obj.rotation.y=rot;
@@ -2260,6 +2319,7 @@ function placeTower(row, col, def) {
   if (!model) {
     const geo = new THREE.CylinderGeometry(0.25, 0.3, 0.7, 8);
     const mat = new THREE.MeshLambertMaterial({ color: def.color || 0x888888 });
+    _applyCavity(mat);
     model = new THREE.Mesh(geo, mat);
   }
   
@@ -2356,6 +2416,7 @@ function spawnEnemy(typeId, hpMult) {
   if (!model) {
     const geo = new THREE.SphereGeometry(0.25, 8, 6);
     const mat = new THREE.MeshLambertMaterial({ color: def.color });
+    _applyCavity(mat);
     model = new THREE.Mesh(geo, mat);
   }
   
@@ -2660,6 +2721,9 @@ function buildReflection() {
 // ============================================================
 let lastTime = 0;
 let rangeRing = null;
+
+
+// ════════════════════════════════════════════════════════════════
 
 function gameLoop(ts) {
   animFrameId = requestAnimationFrame(gameLoop);
