@@ -167,7 +167,7 @@ pointer-events:auto;
 #btn-music:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.5);}
 #btn-music img{width:30px;height:30px;filter:brightness(0);}
 #btn-music-menu{
-position:fixed;bottom:calc(var(–safe-b,0px) + 16px);left:16px;
+position:absolute;top:16px;left:16px;
 width:52px;height:52px;background:#fff;
 border-radius:50%;border:3px solid #000;
 display:flex;align-items:center;justify-content:center;
@@ -601,46 +601,6 @@ function loadTextureOnce(url) {
   return tex;
 }
 
-
-// ══ EDGE HIGHLIGHT ══════════════════════════════════════════════
-// Patched onto every MeshLambertMaterial at GLB load time.
-// Uses screen-space derivatives of the world normal to detect
-// low-poly edge boundaries and brightens them.
-// ════════════════════════════════════════════════════════════════
-function _applyEdgeHighlight(mat) {
-  if (!mat || mat._edgePatched) return;
-  mat._edgePatched = true;
-  mat.onBeforeCompile = (shader) => {
-    // Expose world-space normal to fragment shader
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `#include <worldpos_vertex>
-vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
-    );
-    shader.vertexShader = 'varying vec3 vWorldNormal;\n' + shader.vertexShader;
-    shader.fragmentShader = 'varying vec3 vWorldNormal;\n' + shader.fragmentShader;
-
-    // Inject uniforms and edge-highlight at the END of fragment main
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <output_fragment>',
-      `#include <output_fragment>
-// Edge highlight: screen-space normal derivative detects geometric edges
-{
-  vec3 ddx = dFdx(vWorldNormal);
-  vec3 ddy = dFdy(vWorldNormal);
-  float edgeMag = length(ddx) + length(ddy);
-  // edgeMag large = steep normal change = polygon edge
-  // Soft threshold — remap to 0..1 highlight strength
-  float edgeStrength = smoothstep(0.15, 1.2, edgeMag * 6.0);
-  // Brighten towards white, preserving hue
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, min(gl_FragColor.rgb * 2.2 + 0.12, vec3(1.0)), edgeStrength * 0.55);
-}
-`
-    );
-  };
-  mat.needsUpdate = true;
-}
-// ════════════════════════════════════════════════════════════════
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -734,7 +694,6 @@ class GLBLoader {
     if (gltf.materials) {
       for (const mat of gltf.materials) {
         const m = new THREE.MeshLambertMaterial();
-        _applyEdgeHighlight(m);
         if (mat.pbrMetallicRoughness) {
           const pbr = mat.pbrMetallicRoughness;
           if (pbr.baseColorTexture !== undefined && textures[pbr.baseColorTexture.index]) {
@@ -777,7 +736,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : (() => { const _fm = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHighlight(_fm); return _fm; })();
+          : new THREE.MeshLambertMaterial({ color: 0x88aa88 });
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -871,7 +830,6 @@ const TILE_TREE = 4;
 const TILE_ROCK = 5;
 const TILE_START = 6;
 const TILE_END = 7;
-const TILE_ZONE = 8; // Зона для размещения башен — только на этих тайлах можно строить
 
 // Default map — 4 lanes, lush decoration
 // COORDINATE: row=z (south+), col=x (east+)
@@ -998,12 +956,12 @@ const ANIMAL_DEFS = [
 // ENEMY DEFINITIONS
 // ============================================================
 const ENEMY_DEFS = [
-  { id:'worker', name:'Worker', icon:'👷', hp:80, speed:1.5, reward:2, color:0xff8800, scale:0.4, modelKey:'enemy_ufo_a' },
-  { id:'runner', name:'Runner', icon:'🏃', hp:50, speed:3, reward:2, color:0xff4444, scale:0.35, modelKey:'enemy_ufo_b' },
-  { id:'fatguy', name:'Fat Guy', icon:'🐷', hp:200, speed:0.8, reward:5, color:0xffaaaa, scale:0.5, modelKey:'enemy_ufo_c' },
-  { id:'police', name:'Police', icon:'👮', hp:150, speed:1.8, reward:5, color:0x4444ff, scale:0.4, modelKey:'enemy_ufo_a' },
-  { id:'engineer', name:'Engineer', icon:'🔧', hp:120, speed:2, reward:5, color:0x44ff44, scale:0.4, modelKey:'enemy_ufo_b' },
-  { id:'boss', name:'BOSS', icon:'👹', hp:1000, speed:0.8, reward:25, color:0xff0000, scale:0.7, modelKey:'enemy_ufo_d' },
+  { id:'worker', name:'Worker', icon:'👷', hp:80, speed:1.5, reward:10, color:0xff8800, scale:0.4, modelKey:'enemy_ufo_a' },
+  { id:'runner', name:'Runner', icon:'🏃', hp:50, speed:3, reward:15, color:0xff4444, scale:0.35, modelKey:'enemy_ufo_b' },
+  { id:'fatguy', name:'Fat Guy', icon:'🐷', hp:200, speed:0.8, reward:20, color:0xffaaaa, scale:0.5, modelKey:'enemy_ufo_c' },
+  { id:'police', name:'Police', icon:'👮', hp:150, speed:1.8, reward:25, color:0x4444ff, scale:0.4, modelKey:'enemy_ufo_a' },
+  { id:'engineer', name:'Engineer', icon:'🔧', hp:120, speed:2, reward:30, color:0x44ff44, scale:0.4, modelKey:'enemy_ufo_b' },
+  { id:'boss', name:'BOSS', icon:'👹', hp:1000, speed:0.8, reward:100, color:0xff0000, scale:0.7, modelKey:'enemy_ufo_d' },
 ];
 
 // ============================================================
@@ -1013,7 +971,7 @@ function buildWave(waveNum) {
   const enemies = [];
   const isBossWave = waveNum % 5 === 0;
   const count = 5 + waveNum * 3;
-  const hpMult = 1 + (waveNum - 1) * 0.6; // х0.6 за волну — враги быстро становятся крепкими
+  const hpMult = 1 + (waveNum - 1) * 0.3;
   const spawnInterval = Math.max(0.3, 1.5 - waveNum * 0.05);
   
   if (isBossWave) {
@@ -1143,28 +1101,24 @@ function initThree() {
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // Tight frustum = максимальный texel density без увеличения mapSize
-  // Остров 20 тайлов = 20 units + небольшой запас по краям
-  sunLight.shadow.mapSize.width  = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near =  5;   // убираем пустой воздух — лучше depth precision
-  sunLight.shadow.camera.far  = 55;
-  sunLight.shadow.camera.left   = -14;
-  sunLight.shadow.camera.right  =  14;
-  sunLight.shadow.camera.top    =  14;
-  sunLight.shadow.camera.bottom = -14;
+  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
+  sunLight.shadow.mapSize.width  = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near = 0.5;
+  sunLight.shadow.camera.far  = 80;
+  // Охватываем весь остров 20x20 тайлов
+  sunLight.shadow.camera.left   = -25;
+  sunLight.shadow.camera.right  =  25;
+  sunLight.shadow.camera.top    =  25;
+  sunLight.shadow.camera.bottom = -25;
 
-  // Slope-scale bias по формуле из learnopengl:
-  // texelSize = frustumWidth / mapSize = 28 / 2048 = 0.01367 world units
-  // bias нужен >= нескольких texel в пространстве глубины
-  // bias = -(texelSize / depthRange) * slopeFactor = -(0.01367/50)*3 ≈ -0.00082
-  // Берём -0.0015 с запасом чтобы убить acne на flat поверхностях (тайлы, дорога)
-  sunLight.shadow.bias       = -0.0015;
-  // normalBias сдвигает позицию вдоль нормали — убирает acne на наклонных (деревья, заборы)
-  // normalBias = 2 texela = 0.01367 * 2 = 0.027 → берём 0.04 с запасом
-  sunLight.shadow.normalBias =  0.04;
-  // radius 3-4: мягкие края без размытия самого shadowmap (12 = acne усиливается)
-  sunLight.shadow.radius     =  3;
+  // Ключевые параметры мягких теней без полос:
+  // bias: небольшой отрицательный убирает shadow acne
+  // normalBias: компенсирует артефакты на наклонных поверхностях
+  // radius: размытие PCF — чем больше тем мягче тень
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1350,12 +1304,7 @@ function buildMap(g, customCellData) {
 
     let key,rot=0;
 
-    if(tt===TILE_ZONE) {
-      // Зона башни: рендерим как обычный тайл + добавляем зелёный маркер сверху
-      if(isEditorMap && customCellData[cellKey]) { key=customCellData[cellKey].modelKey; rot=customCellData[cellKey].rot; }
-      else { key=GRASS_POOL[(r*3+c*7)%GRASS_POOL.length]; rot=((r*5+c*9)%4)*Math.PI/2; }
-    }
-    else if(tt===TILE_START)     {key='tile_spawn_round';}
+    if(tt===TILE_START)     {key='tile_spawn_round';}
     else if(tt===TILE_END)  {key='tile_end_round';}
     else if(tt===TILE_ROAD) {
       // Use custom model/rot if editor placed it, otherwise auto-detect
@@ -1380,10 +1329,10 @@ function buildMap(g, customCellData) {
 
     let obj=assets.clone(key);
     if(!obj){
-      const clr={[TILE_GRASS]:0x7bc965,[TILE_ZONE]:0x5dcc88,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
+      const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-          (() => { const _bm = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHighlight(_bm); return _bm; })())
+          new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}));
     }
     scaleTo(obj,TILE_SIZE);
     obj.rotation.y=rot;
@@ -1391,16 +1340,6 @@ function buildMap(g, customCellData) {
     obj.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
-
-    // Зона башни: добавляем визуальный маркер (зелёный полупрозрачный круг)
-    if(tt===TILE_ZONE) {
-      const zGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.04, 16);
-      const zMat = new THREE.MeshBasicMaterial({ color:0x00ff88, transparent:true, opacity:0.45, depthWrite:false });
-      const zMesh = new THREE.Mesh(zGeo, zMat);
-      zMesh.position.set(c*TILE_SIZE, 0.12, r*TILE_SIZE);
-      zMesh.renderOrder = 3;
-      addToScene(zMesh); tileObjects.push(zMesh);
-    }
   }
 
   // === RICH DECORATIONS on open grass tiles (only for default maps, not editor) ===
@@ -1483,9 +1422,6 @@ const ED_PALETTE = [
   { type:TILE_END,   modelKey:'tile_end',              label:'База',       icon:'🏁', cat:'⭐ Старт/Финиш' },
   { type:TILE_END,   modelKey:'tile_spawn_end_round',  label:'С+Ф',        icon:'🔄', cat:'⭐ Старт/Финиш' },
   // === ПРИРОДА ===
-  { type:TILE_ZONE,  modelKey:'tile',                  label:'⚔ Зона башни', icon:'⚔', cat:'⭐ Старт/Финиш' },
-  { type:TILE_ZONE,  modelKey:'tile_dirt',             label:'⚔ З.Земля',  icon:'⚔', cat:'🌿 Природа' },
-  { type:TILE_ZONE,  modelKey:'snow_tile',             label:'⚔ З.Снег',   icon:'⚔', cat:'❄️ Снег' },
   { type:TILE_GRASS, modelKey:'tile',                  label:'Трава',      icon:'🟩', cat:'🌿 Природа' },
   { type:TILE_GRASS, modelKey:'tile_dirt',             label:'Земля',      icon:'🟫', cat:'🌿 Природа' },
   { type:TILE_TREE,  modelKey:'tile_tree',             label:'Дерево',     icon:'🌲', cat:'🌿 Природа' },
@@ -1706,7 +1642,6 @@ function buildEditorPalette() {
 function openEditor() {
   editorActive = true;
   edCellData = {};
-  edFreeObjects = []; // сброс free objects чтобы не появлялись блоки с прошлого сеанса
   editorGrid = Array.from({length:GRID_H}, ()=>Array(GRID_W).fill(TILE_GRASS));
   document.getElementById('editor-screen').style.display='flex';
   document.getElementById('main-menu').classList.add('hidden');
@@ -1825,7 +1760,7 @@ function rebuildEditorCell(r, c) {
   let obj = assets.clone(key);
   if(!obj) {
     obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-      (() => { const _em = new THREE.MeshLambertMaterial({color:0x888888}); _applyEdgeHighlight(_em); return _em; })());
+      new THREE.MeshLambertMaterial({color:0x888888}));
   }
   scaleTo(obj, TILE_SIZE);
   obj.rotation.y = rot;
@@ -2299,17 +2234,9 @@ function setupEditorEvents() {
 // ============================================================
 // PLACE TOWER
 // ============================================================
-const MAX_ALLIES = 6; // максимум союзников на карте
-
 function placeTower(row, col, def) {
   if (gold < def.cost) return false;
-  if (grid[row][col] !== TILE_ZONE) return false; // только на зонах башен
-  if (towers.length >= MAX_ALLIES) {
-    // Показываем уведомление
-    const info = document.getElementById('wave-notify');
-    if (info) { info.textContent = '⚠ Максимум 6 союзников!'; info.style.opacity='1'; setTimeout(()=>info.style.opacity='0',2000); }
-    return false;
-  }
+  if (grid[row][col] !== TILE_GRASS) return false;
   if (towers.find(t => t.row===row && t.col===col)) return false;
   
   gold -= def.cost;
@@ -3084,7 +3011,7 @@ function checkWaveComplete() {
   } else {
     showWaveNotify(`Wave ${wave} Complete!`, `Prepare for Wave ${wave + 1}`);
     // Bonus gold
-    gold += 10 + wave * 3; // небольшой бонус за волну
+    gold += 50 + wave * 10;
     updateHUD();
   }
 }
