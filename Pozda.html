@@ -601,46 +601,6 @@ function loadTextureOnce(url) {
   return tex;
 }
 
-
-// ══ EDGE HIGHLIGHT ══════════════════════════════════════════════
-// Patched onto every MeshLambertMaterial at GLB load time.
-// Uses screen-space derivatives of the world normal to detect
-// low-poly edge boundaries and brightens them.
-// ════════════════════════════════════════════════════════════════
-function _applyEdgeHighlight(mat) {
-  if (!mat || mat._edgePatched) return;
-  mat._edgePatched = true;
-  mat.onBeforeCompile = (shader) => {
-    // Expose world-space normal to fragment shader
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `#include <worldpos_vertex>
-vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
-    );
-    shader.vertexShader = 'varying vec3 vWorldNormal;\n' + shader.vertexShader;
-    shader.fragmentShader = 'varying vec3 vWorldNormal;\n' + shader.fragmentShader;
-
-    // Inject uniforms and edge-highlight at the END of fragment main
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <output_fragment>',
-      `#include <output_fragment>
-// Edge highlight: screen-space normal derivative detects geometric edges
-{
-  vec3 ddx = dFdx(vWorldNormal);
-  vec3 ddy = dFdy(vWorldNormal);
-  float edgeMag = length(ddx) + length(ddy);
-  // edgeMag large = steep normal change = polygon edge
-  // Soft threshold — remap to 0..1 highlight strength
-  float edgeStrength = smoothstep(0.15, 1.2, edgeMag * 6.0);
-  // Brighten towards white, preserving hue
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, min(gl_FragColor.rgb * 2.2 + 0.12, vec3(1.0)), edgeStrength * 0.55);
-}
-`
-    );
-  };
-  mat.needsUpdate = true;
-}
-// ════════════════════════════════════════════════════════════════
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -734,7 +694,6 @@ class GLBLoader {
     if (gltf.materials) {
       for (const mat of gltf.materials) {
         const m = new THREE.MeshLambertMaterial();
-        _applyEdgeHighlight(m);
         if (mat.pbrMetallicRoughness) {
           const pbr = mat.pbrMetallicRoughness;
           if (pbr.baseColorTexture !== undefined && textures[pbr.baseColorTexture.index]) {
@@ -777,7 +736,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : (() => { const _fm = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); _applyEdgeHighlight(_fm); return _fm; })();
+          : new THREE.MeshLambertMaterial({ color: 0x88aa88 });
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -1142,28 +1101,24 @@ function initThree() {
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
-  // Tight frustum = максимальный texel density без увеличения mapSize
-  // Остров 20 тайлов = 20 units + небольшой запас по краям
-  sunLight.shadow.mapSize.width  = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near =  5;   // убираем пустой воздух — лучше depth precision
-  sunLight.shadow.camera.far  = 55;
-  sunLight.shadow.camera.left   = -14;
-  sunLight.shadow.camera.right  =  14;
-  sunLight.shadow.camera.top    =  14;
-  sunLight.shadow.camera.bottom = -14;
+  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
+  sunLight.shadow.mapSize.width  = 4096;
+  sunLight.shadow.mapSize.height = 4096;
+  sunLight.shadow.camera.near = 0.5;
+  sunLight.shadow.camera.far  = 80;
+  // Охватываем весь остров 20x20 тайлов
+  sunLight.shadow.camera.left   = -25;
+  sunLight.shadow.camera.right  =  25;
+  sunLight.shadow.camera.top    =  25;
+  sunLight.shadow.camera.bottom = -25;
 
-  // Slope-scale bias по формуле из learnopengl:
-  // texelSize = frustumWidth / mapSize = 28 / 2048 = 0.01367 world units
-  // bias нужен >= нескольких texel в пространстве глубины
-  // bias = -(texelSize / depthRange) * slopeFactor = -(0.01367/50)*3 ≈ -0.00082
-  // Берём -0.0015 с запасом чтобы убить acne на flat поверхностях (тайлы, дорога)
-  sunLight.shadow.bias       = -0.0015;
-  // normalBias сдвигает позицию вдоль нормали — убирает acne на наклонных (деревья, заборы)
-  // normalBias = 2 texela = 0.01367 * 2 = 0.027 → берём 0.04 с запасом
-  sunLight.shadow.normalBias =  0.04;
-  // radius 3-4: мягкие края без размытия самого shadowmap (12 = acne усиливается)
-  sunLight.shadow.radius     =  3;
+  // Ключевые параметры мягких теней без полос:
+  // bias: небольшой отрицательный убирает shadow acne
+  // normalBias: компенсирует артефакты на наклонных поверхностях
+  // radius: размытие PCF — чем больше тем мягче тень
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -1238,8 +1193,6 @@ function initThree() {
 
   window.addEventListener('resize', onResize);
 
-  // Инициализируем SSAO после создания renderer/camera
-  initSSAO();
 }
 
 function updateCamera() {
@@ -1256,24 +1209,6 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 
-<<<<<<< HEAD
-=======
-  // Пересоздаём SSAO RT под новый размер
-  if (_ssao) {
-    const dpr = renderer.getPixelRatio();
-    const W = Math.floor(window.innerWidth  * dpr);
-    const H = Math.floor(window.innerHeight * dpr);
-    _ssao.sceneRT.setSize(W, H);
-    _ssao.normalRT.setSize(W, H);
-    _ssao.ssaoRT.setSize(Math.floor(W/2), Math.floor(H/2));
-    _ssao.blurRT.setSize(Math.floor(W/2), Math.floor(H/2));
-    _ssao.ssaoMat.uniforms.uRes.value.set(W, H);
-    _ssao.ssaoMat.uniforms.uNoiseScale.value.set(W/4, H/4);
-    const halfRes = new THREE.Vector2(1/(W/2), 1/(H/2));
-    _ssao.blurMat.uniforms.uRes.value.copy(halfRes);
-    _ssao.s_blurV.children[0].material.uniforms.uRes.value.copy(halfRes);
-  }
->>>>>>> 2b7ae2005fe6a9338d6b79fafe7507d21c77b3a5
 }
 
 // ============================================================
@@ -1397,7 +1332,7 @@ function buildMap(g, customCellData) {
       const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-          (() => { const _bm = new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}); _applyEdgeHighlight(_bm); return _bm; })())
+          new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}));
     }
     scaleTo(obj,TILE_SIZE);
     obj.rotation.y=rot;
@@ -1825,7 +1760,7 @@ function rebuildEditorCell(r, c) {
   let obj = assets.clone(key);
   if(!obj) {
     obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
-      (() => { const _em = new THREE.MeshLambertMaterial({color:0x888888}); _applyEdgeHighlight(_em); return _em; })());
+      new THREE.MeshLambertMaterial({color:0x888888}));
   }
   scaleTo(obj, TILE_SIZE);
   obj.rotation.y = rot;
@@ -2726,334 +2661,6 @@ function buildReflection() {
 let lastTime = 0;
 let rangeRing = null;
 
-
-// ════════════════════════════════════════════════════════════════
-// SSAO — Screen Space Ambient Occlusion
-// Полное разрешение, без пикселизации, оптимизирован для мобильных
-// ════════════════════════════════════════════════════════════════
-let _ssao = null;
-
-function initSSAO() {
-  if (_ssao) return;
-
-  const dpr = renderer.getPixelRatio();
-  const W   = Math.floor(window.innerWidth  * dpr);
-  const H   = Math.floor(window.innerHeight * dpr);
-
-  // ── Render Targets ────────────────────────────────────────
-  // Полное разрешение — ключ к отсутствию пикселизации
-  const makeRT = (w, h, depth) => new THREE.WebGLRenderTarget(w, h, {
-    minFilter:     THREE.LinearFilter,
-    magFilter:     THREE.LinearFilter,
-    format:        THREE.RGBAFormat,
-    type:          THREE.UnsignedByteType,
-    depthBuffer:   !!depth,
-    stencilBuffer: false,
-  });
-
-  const sceneRT  = makeRT(W, H, true);   // цвет сцены
-  const normalRT = makeRT(W, H, true);   // нормали + глубина
-  // SSAO рендерим в половину разрешения — для скорости,
-  // но билинейно апсемплируем при compositing → нет пикселей
-  const ssaoRT   = makeRT(Math.floor(W/2), Math.floor(H/2), false);
-  const blurRT   = makeRT(Math.floor(W/2), Math.floor(H/2), false);
-
-  // ── Kernel: 16 полусферных sample-ов ─────────────────────
-  // Больше sample-ов ближе к центру (lerp к 0.1)
-  const KERNEL_SIZE = 16;
-  const kernel = [];
-  for (let i = 0; i < KERNEL_SIZE; i++) {
-    const s = new THREE.Vector3(
-      Math.random() * 2 - 1,
-      Math.random() * 2 - 1,
-      Math.random()
-    ).normalize();
-    let scale = i / KERNEL_SIZE;
-    scale = 0.1 + scale * scale * 0.9; // accelerating falloff
-    s.multiplyScalar(scale * (0.5 + Math.random() * 0.5));
-    kernel.push(s);
-  }
-
-  // ── Noise texture: 4x4 random rotations ──────────────────
-  const noiseData = new Uint8Array(16 * 4);
-  for (let i = 0; i < 16; i++) {
-    const a = Math.random() * Math.PI * 2;
-    noiseData[i*4+0] = ((Math.cos(a) * 0.5 + 0.5) * 255) | 0;
-    noiseData[i*4+1] = ((Math.sin(a) * 0.5 + 0.5) * 255) | 0;
-    noiseData[i*4+2] = 128;
-    noiseData[i*4+3] = 255;
-  }
-  const noiseTex = new THREE.DataTexture(noiseData, 4, 4, THREE.RGBAFormat);
-  noiseTex.wrapS = noiseTex.wrapT = THREE.RepeatWrapping;
-  noiseTex.needsUpdate = true;
-
-  // ── Projection matrix helpers ─────────────────────────────
-  const proj = camera.projectionMatrix.clone();
-
-  // ── Fullscreen utilities ──────────────────────────────────
-  const fsGeo   = new THREE.PlaneGeometry(2, 2);
-  const fsOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  const makeFsScene = (mat) => { const s = new THREE.Scene(); s.add(new THREE.Mesh(fsGeo, mat)); return s; };
-
-  // ── Pass 1 mat: render normals+depth ─────────────────────
-  // MeshNormalMaterial пишет view-space нормаль в RGB
-  // Глубину считаем из gl_FragCoord.z в доп. шейдере
-  const normalMat = new THREE.ShaderMaterial({
-    vertexShader: `
-      varying vec3 vNormal;
-      varying float vDepth;
-      void main(){
-        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-        vNormal = normalize(normalMatrix * normal);
-        gl_Position = projectionMatrix * mvPos;
-        vDepth = -mvPos.z; // linearized view-space depth
-      }`,
-    fragmentShader: `
-      varying vec3 vNormal;
-      varying float vDepth;
-      void main(){
-        // нормаль в [0,1], глубина в alpha
-        gl_FragColor = vec4(vNormal * 0.5 + 0.5, vDepth / 50.0);
-      }`,
-  });
-
-  // ── SSAO material ─────────────────────────────────────────
-  const kernelUniforms = kernel.map(v => ({ value: v }));
-  const ssaoMat = new THREE.ShaderMaterial({
-    uniforms: {
-      tNormal:      { value: normalRT.texture },
-      tNoise:       { value: noiseTex },
-      uKernel:      { value: kernel },
-      uProj:        { value: proj },
-      uProjInv:     { value: new THREE.Matrix4().copy(proj).invert() },
-      uRes:         { value: new THREE.Vector2(W, H) },
-      uRadius:      { value: 0.4 },     // радиус AO в view-space units
-      uBias:        { value: 0.025 },   // bias против self-occlusion
-      uStrength:    { value: 1.2 },     // сила эффекта
-      uNoiseScale:  { value: new THREE.Vector2(W/4, H/4) },
-    },
-    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
-    fragmentShader: `
-      uniform sampler2D tNormal;
-      uniform sampler2D tNoise;
-      uniform vec3      uKernel[16];
-      uniform mat4      uProj;
-      uniform mat4      uProjInv;
-      uniform vec2      uRes;
-      uniform float     uRadius;
-      uniform float     uBias;
-      uniform float     uStrength;
-      uniform vec2      uNoiseScale;
-      varying vec2 vUv;
-
-      // Восстанавливаем view-space позицию из depth и uv
-      vec3 getViewPos(vec2 uv){
-        vec4 nd = texture2D(tNormal, uv);
-        float depth = nd.w * 50.0; // обратно в view-space depth
-        // из UV в NDC
-        vec2 ndc = uv * 2.0 - 1.0;
-        // view-space X,Y через proj
-        vec4 clip = vec4(ndc, -1.0, 1.0);
-        vec4 viewRay = uProjInv * clip;
-        viewRay.xyz /= viewRay.w;
-        // нормируем по Z
-        return normalize(viewRay.xyz) * depth;
-      }
-
-      void main(){
-        vec4 nd      = texture2D(tNormal, vUv);
-        vec3 normal  = normalize(nd.xyz * 2.0 - 1.0);
-        vec3 fragPos = getViewPos(vUv);
-
-        // random rotation из noise
-        vec2 noiseUV = vUv * uNoiseScale;
-        vec3 randomVec = normalize(texture2D(tNoise, noiseUV).xyz * 2.0 - 1.0);
-
-        // TBN matrix для ориентации kernel в полусфере нормали
-        vec3 tangent   = normalize(randomVec - normal * dot(randomVec, normal));
-        vec3 bitangent = cross(normal, tangent);
-        mat3 TBN       = mat3(tangent, bitangent, normal);
-
-        float occlusion = 0.0;
-        const int SAMPLES = 16;
-        for(int i = 0; i < SAMPLES; i++){
-          // view-space sample position
-          vec3 samplePos = TBN * uKernel[i];
-          samplePos = fragPos + samplePos * uRadius;
-
-          // project sample to get UV
-          vec4 offset = uProj * vec4(samplePos, 1.0);
-          offset.xyz /= offset.w;
-          vec2 sampleUV = offset.xy * 0.5 + 0.5;
-
-          // sample depth at that UV
-          float sampleDepth = texture2D(tNormal, sampleUV).w * 50.0;
-          float sampleZ     = -abs(sampleDepth);
-
-          // range check + accumulate
-          float rangeCheck = smoothstep(0.0, 1.0, uRadius / abs(fragPos.z - sampleZ + 0.001));
-          occlusion += (sampleZ >= samplePos.z + uBias ? 1.0 : 0.0) * rangeCheck;
-        }
-
-        occlusion = 1.0 - (occlusion / float(SAMPLES)) * uStrength;
-        occlusion = clamp(occlusion, 0.0, 1.0);
-        // Поднимаем минимум — AO не должен быть чёрным, только мягким
-        occlusion = mix(1.0, occlusion, 0.65);
-
-        gl_FragColor = vec4(vec3(occlusion), 1.0);
-      }`,
-  });
-
-  // ── Bilateral blur material (сохраняет чёткость краёв) ───
-  const blurMat = new THREE.ShaderMaterial({
-    uniforms: {
-      tSSAO:   { value: ssaoRT.texture },
-      tNormal: { value: normalRT.texture },
-      uDir:    { value: new THREE.Vector2(1, 0) },
-      uRes:    { value: new THREE.Vector2(1/(W/2), 1/(H/2)) },
-    },
-    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
-    fragmentShader: `
-      uniform sampler2D tSSAO;
-      uniform sampler2D tNormal;
-      uniform vec2 uDir;
-      uniform vec2 uRes;
-      varying vec2 vUv;
-      void main(){
-        // 5-tap bilateral blur: не размывает через края (разные нормали)
-        vec3  centerNorm  = texture2D(tNormal, vUv).xyz;
-        float result = 0.0;
-        float total  = 0.0;
-        float weights[5]; weights[0]=0.0625; weights[1]=0.25; weights[2]=0.375; weights[3]=0.25; weights[4]=0.0625;
-        for(int i=-2; i<=2; i++){
-          vec2  uv2    = vUv + uDir * uRes * float(i);
-          vec3  norm2  = texture2D(tNormal, uv2).xyz;
-          float nDot   = max(dot(centerNorm, norm2), 0.0);
-          float w      = weights[i+2] * pow(nDot, 8.0); // билатеральный вес
-          result += texture2D(tSSAO, uv2).r * w;
-          total  += w;
-        }
-        gl_FragColor = vec4(vec3(total > 0.001 ? result/total : texture2D(tSSAO,vUv).r), 1.0);
-      }`,
-  });
-
-  // ── Composite material: умножаем AO на цвет сцены ────────
-  const compositeMat = new THREE.ShaderMaterial({
-    uniforms: {
-      tScene: { value: sceneRT.texture },
-      tAO:    { value: blurRT.texture },
-    },
-    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
-    fragmentShader: `
-      uniform sampler2D tScene;
-      uniform sampler2D tAO;
-      varying vec2 vUv;
-      void main(){
-        vec4  color = texture2D(tScene, vUv);
-        float ao    = texture2D(tAO,    vUv).r;
-        // Умножение: AO затемняет только тёмные области
-        // pow(ao, 1.2) — чуть усиливаем контраст без перебора
-        color.rgb *= pow(ao, 1.2);
-        gl_FragColor = color;
-      }`,
-  });
-
-  // Сцены для каждого прохода
-  const s_normal    = makeFsScene(normalMat);   // не используется как fullscreen — см ниже
-  const s_ssao      = makeFsScene(ssaoMat);
-  const s_blurH     = makeFsScene(blurMat);
-  const s_blurV     = makeFsScene(new THREE.ShaderMaterial({  // вертикальный blur
-    uniforms: {
-      tSSAO:   { value: blurRT.texture },
-      tNormal: { value: normalRT.texture },
-      uDir:    { value: new THREE.Vector2(0, 1) },
-      uRes:    { value: new THREE.Vector2(1/(W/2), 1/(H/2)) },
-    },
-    vertexShader: blurMat.vertexShader,
-    fragmentShader: blurMat.fragmentShader,
-  }));
-  const s_composite = makeFsScene(compositeMat);
-
-  _ssao = {
-    sceneRT, normalRT, ssaoRT, blurRT,
-    normalMat,
-    ssaoMat, blurMat, compositeMat,
-    s_ssao, s_blurH, s_blurV, s_composite,
-    fsOrtho, W, H,
-  };
-}
-
-// Материал для прохода нормалей (используем traverse)
-const _ssaoNormalMat = new THREE.ShaderMaterial({
-  vertexShader: `
-    varying vec3 vNormal;
-    varying float vDepth;
-    void main(){
-      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-      vNormal = normalize(normalMatrix * normal);
-      gl_Position = projectionMatrix * mvPos;
-      vDepth = -mvPos.z;
-    }`,
-  fragmentShader: `
-    varying vec3 vNormal;
-    varying float vDepth;
-    void main(){
-      gl_FragColor = vec4(vNormal * 0.5 + 0.5, vDepth / 50.0);
-    }`,
-  side: THREE.FrontSide,
-});
-
-function _ssaoRender() {
-  if (!_ssao) { renderer.render(scene, camera); return; }
-
-  const S = _ssao;
-
-  // ── Pass 1a: цвет сцены ──────────────────────────────────
-  renderer.setRenderTarget(S.sceneRT);
-  renderer.render(scene, camera);
-
-  // ── Pass 1b: нормали + глубина ──────────────────────────
-  // Подменяем материалы только для мешей (не вода/пена/gizmo)
-  const saved = [];
-  scene.traverse(obj => {
-    if (!obj.isMesh || !obj.material) return;
-    if (obj.userData.noSSAO || obj.userData.persistent === false) return;
-    // Пропускаем прозрачные объекты и UI
-    const mat = obj.material;
-    if (Array.isArray(mat)) return; // пропускаем multi-material
-    if (mat.transparent && mat.opacity < 0.9) return;
-    saved.push({ obj, mat });
-    obj.material = _ssaoNormalMat;
-  });
-
-  renderer.setRenderTarget(S.normalRT);
-  renderer.render(scene, camera);
-
-  // Восстанавливаем
-  for (const { obj, mat } of saved) obj.material = mat;
-
-  // ── Pass 2: SSAO (полразрешения — для скорости) ──────────
-  S.ssaoMat.uniforms.uProj.value.copy(camera.projectionMatrix);
-  S.ssaoMat.uniforms.uProjInv.value.copy(camera.projectionMatrix).invert();
-  renderer.setRenderTarget(S.ssaoRT);
-  renderer.render(S.s_ssao, S.fsOrtho);
-
-  // ── Pass 3: Blur horizontal ──────────────────────────────
-  renderer.setRenderTarget(S.blurRT);
-  renderer.render(S.s_blurH, S.fsOrtho);
-
-  // ── Pass 4: Blur vertical (пишем обратно в ssaoRT) ──────
-  S.s_blurV.children[0].material.uniforms.tSSAO.value = S.blurRT.texture;
-  renderer.setRenderTarget(S.ssaoRT);
-  renderer.render(S.s_blurV, S.fsOrtho);
-
-  // ── Pass 5: Composite на экран ──────────────────────────
-  S.compositeMat.uniforms.tAO.value = S.ssaoRT.texture;
-  renderer.setRenderTarget(null);
-  renderer.render(S.s_composite, S.fsOrtho);
-}
-// ════════════════════════════════════════════════════════════════
-
 function gameLoop(ts) {
   animFrameId = requestAnimationFrame(gameLoop);
   
@@ -3080,11 +2687,7 @@ function gameLoop(ts) {
 
 
   if (gameState !== 'playing') {
-<<<<<<< HEAD
     renderer.render(scene, camera);
-=======
-    _ssaoRender();
->>>>>>> 2b7ae2005fe6a9338d6b79fafe7507d21c77b3a5
     return;
   }
   
@@ -3095,11 +2698,7 @@ function gameLoop(ts) {
   updateWaveSpawner(dt);
   checkWaveComplete();
   
-<<<<<<< HEAD
   renderer.render(scene, camera);
-=======
-  _ssaoRender();
->>>>>>> 2b7ae2005fe6a9338d6b79fafe7507d21c77b3a5
 }
 
 function updateEnemies(dt) {
