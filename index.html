@@ -830,6 +830,7 @@ const TILE_TREE = 4;
 const TILE_ROCK = 5;
 const TILE_START = 6;
 const TILE_END = 7;
+const TILE_ZONE = 8; // Зона размещения башен — только сюда можно ставить союзников
 
 // Default map — 4 lanes, lush decoration
 // COORDINATE: row=z (south+), col=x (east+)
@@ -1008,6 +1009,7 @@ let towers = [];
 let enemies = [];
 let projectiles = [];
 let particles = [];
+let _placementAnims = []; // анимации появления башен/животных
 let gold = 300;
 let lives = 20;
 let wave = 0;
@@ -1299,12 +1301,16 @@ function buildMap(g, customCellData) {
     const tt=g[r][c];
     const cellKey = r+','+c;
     
-    // For editor maps: skip pure GRASS cells that weren't explicitly placed
-    if(isEditorMap && tt===TILE_GRASS && !customCellData[cellKey]) continue;
+    // For editor maps: skip pure GRASS/ZONE cells that weren't explicitly placed
+    if(isEditorMap && (tt===TILE_GRASS||tt===TILE_ZONE) && !customCellData[cellKey]) continue;
 
     let key,rot=0;
 
-    if(tt===TILE_START)     {key='tile_spawn_round';}
+    if(tt===TILE_ZONE) {
+      if(isEditorMap && customCellData[cellKey]) { key=customCellData[cellKey].modelKey; rot=customCellData[cellKey].rot; }
+      else { key='tile'; rot=0; }
+    }
+    else if(tt===TILE_START)     {key='tile_spawn_round';}
     else if(tt===TILE_END)  {key='tile_end_round';}
     else if(tt===TILE_ROAD) {
       // Use custom model/rot if editor placed it, otherwise auto-detect
@@ -1329,7 +1335,7 @@ function buildMap(g, customCellData) {
 
     let obj=assets.clone(key);
     if(!obj){
-      const clr={[TILE_GRASS]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
+      const clr={[TILE_GRASS]:0x7bc965,[TILE_ZONE]:0x7bc965,[TILE_ROAD]:0xd4a76a,[TILE_TREE]:0x4a8840,
                  [TILE_ROCK]:0x9a9a8a,[TILE_START]:0xffdd44,[TILE_END]:0xff6644};
       obj=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.18,0.95),
           new THREE.MeshLambertMaterial({color:clr[tt]||0x7bc965}));
@@ -1340,6 +1346,18 @@ function buildMap(g, customCellData) {
     obj.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
+
+    // TILE_ZONE: добавляем selection-a (4 жёлтых угла) поверх тайла
+    if(tt===TILE_ZONE) {
+      const selObj = assets.clone('selection_a');
+      if(selObj) {
+        scaleTo(selObj, TILE_SIZE);
+        selObj.position.set(c*TILE_SIZE, 0.12, r*TILE_SIZE); // выше тайла, виден поверх
+        selObj.traverse(m=>{if(m.isMesh){m.castShadow=false;m.receiveShadow=false;}});
+        selObj.userData={type:'zone_marker',row:r,col:c};
+        addToScene(selObj); tileObjects.push(selObj);
+      }
+    }
   }
 
   // === RICH DECORATIONS on open grass tiles (only for default maps, not editor) ===
@@ -1422,6 +1440,11 @@ const ED_PALETTE = [
   { type:TILE_END,   modelKey:'tile_end',              label:'База',       icon:'🏁', cat:'⭐ Старт/Финиш' },
   { type:TILE_END,   modelKey:'tile_spawn_end_round',  label:'С+Ф',        icon:'🔄', cat:'⭐ Старт/Финиш' },
   // === ПРИРОДА ===
+  // ── ЗОНЫ БАШЕН ──────────────────────────────────────────────
+  { type:TILE_ZONE,  modelKey:'tile',      label:'⚔ Зона',      icon:'⚔', cat:'⚔ Зоны' },
+  { type:TILE_ZONE,  modelKey:'tile_dirt',  label:'⚔ Зона.Земля',icon:'⚔', cat:'⚔ Зоны' },
+  { type:TILE_ZONE,  modelKey:'snow_tile',  label:'⚔ Зона.Снег', icon:'⚔', cat:'⚔ Зоны' },
+  // ────────────────────────────────────────────────────────────
   { type:TILE_GRASS, modelKey:'tile',                  label:'Трава',      icon:'🟩', cat:'🌿 Природа' },
   { type:TILE_GRASS, modelKey:'tile_dirt',             label:'Земля',      icon:'🟫', cat:'🌿 Природа' },
   { type:TILE_TREE,  modelKey:'tile_tree',             label:'Дерево',     icon:'🌲', cat:'🌿 Природа' },
@@ -2234,9 +2257,17 @@ function setupEditorEvents() {
 // ============================================================
 // PLACE TOWER
 // ============================================================
+const MAX_ALLIES = 6;
+
 function placeTower(row, col, def) {
   if (gold < def.cost) return false;
-  if (grid[row][col] !== TILE_GRASS) return false;
+  if (grid[row][col] !== TILE_ZONE) return false; // только на зонах с маркером
+  if (towers.length >= MAX_ALLIES) {
+    // Показываем предупреждение
+    const n = document.getElementById('wave-notify');
+    if(n){ n.textContent='⚠ Максимум 6 союзников на карте!'; n.style.opacity='1'; setTimeout(()=>n.style.opacity='0',2500); }
+    return false;
+  }
   if (towers.find(t => t.row===row && t.col===col)) return false;
   
   gold -= def.cost;
@@ -2276,8 +2307,32 @@ function placeTower(row, col, def) {
   model.position.set(col * TILE_SIZE, 0.15, row * TILE_SIZE);
   model.traverse(m => { if(m.isMesh) { m.castShadow=true; } });
   model.userData = { towerId: tower.id };
+
+  // ── Убираем zone_marker с этой клетки ───────────────────────
+  const zoneMarker = _sceneObjects.find(o =>
+    o.userData && o.userData.type === 'zone_marker' &&
+    o.userData.row === row && o.userData.col === col
+  );
+  if (zoneMarker) {
+    scene.remove(zoneMarker);
+    _sceneObjects.splice(_sceneObjects.indexOf(zoneMarker), 1);
+    const ti = tileObjects.indexOf(zoneMarker);
+    if (ti !== -1) tileObjects.splice(ti, 1);
+  }
+
+  // ── Анимация появления: scale 0 → 1 с overshoot + белая вспышка ──
+  const finalScale = model.scale.clone();
+  model.scale.setScalar(0.001); // начинаем с почти нулевого размера
   addToScene(model);
   towerMeshes[tower.id] = model;
+
+  _placementAnims.push({
+    model,
+    baseScale: finalScale,
+    dur: 0.42,   // длительность анимации в секундах
+    t: 0,
+    done: false,
+  });
 
   // ── Lightning: добавляем turret-голову поверх башни ──
   if (def.id === 'lightning') {
@@ -2695,6 +2750,7 @@ function gameLoop(ts) {
   updateTowers(dt);
   updateProjectiles(dt);
   updateParticles(dt);
+  updatePlacementAnims(dt);
   updateWaveSpawner(dt);
   checkWaveComplete();
   
@@ -2944,6 +3000,50 @@ function updateProjectiles(dt) {
   }
   
   projectiles = projectiles.filter(p => !p.dead);
+}
+
+// Обновляем анимации постройки (scale-in + белая вспышка)
+function updatePlacementAnims(dt) {
+  for (const a of _placementAnims) {
+    a.t += dt;
+    const prog = Math.min(a.t / a.dur, 1.0); // 0→1
+
+    // Easing: быстро растёт, немного отскакивает в конце
+    // cubic ease-out + небольшой overshoot
+    let s;
+    if (prog < 0.7) {
+      // Быстрый рост: 0 → 1.2
+      s = (prog / 0.7) * 1.22;
+    } else {
+      // Settling: 1.2 → 1.0
+      const t2 = (prog - 0.7) / 0.3;
+      s = 1.22 - t2 * 0.22;
+    }
+    a.model.scale.copy(a.baseScale).multiplyScalar(s);
+
+    // Белая вспышка: нарастает к концу анимации, потом гаснет
+    const flashProg = Math.max(0, (prog - 0.6) / 0.4); // 0→1 в последние 40%
+    const flashIntensity = flashProg < 0.5
+      ? flashProg / 0.5          // нарастает
+      : 1.0 - (flashProg - 0.5) / 0.5; // гаснет
+
+    a.model.traverse(m => {
+      if (m.isMesh && m.material && m.material.emissive) {
+        m.material.emissive.setRGB(flashIntensity, flashIntensity, flashIntensity);
+      }
+    });
+
+    if (prog >= 1.0) {
+      // Финал: сброс scale и emissive
+      a.model.scale.copy(a.baseScale);
+      a.model.traverse(m => {
+        if (m.isMesh && m.material && m.material.emissive)
+          m.material.emissive.setRGB(0, 0, 0);
+      });
+      a.done = true;
+    }
+  }
+  _placementAnims = _placementAnims.filter(a => !a.done);
 }
 
 function updateParticles(dt) {
@@ -3713,6 +3813,7 @@ async function main() {
     tile_rock: 'assets/td/tile-rock.glb',
     tile_crystal: 'assets/td/tile-crystal.glb',
     // === SPAWN/END ===
+    selection_a: 'assets/td/selection-a.glb', // 4 жёлтых угла — маркер зоны
     tile_spawn_round: 'assets/td/tile-spawn-round.glb',
     tile_spawn: 'assets/td/tile-spawn.glb',
     tile_spawn_end: 'assets/td/tile-spawn-end.glb',
