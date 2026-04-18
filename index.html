@@ -1354,7 +1354,7 @@ function buildMap(g, customCellData) {
         scaleTo(selObj, TILE_SIZE * 1.05);
         selObj.position.set(c*TILE_SIZE, 0.20, r*TILE_SIZE); // поверх тайла
         selObj.traverse(m=>{if(m.isMesh){m.castShadow=false;m.receiveShadow=false;}});
-        selObj.userData={type:'zone_marker',row:r,col:c};
+        selObj.userData={type:'tile', tileType:TILE_ZONE, tileSubtype:'zone_marker', row:r, col:c};
         addToScene(selObj); tileObjects.push(selObj);
       }
     }
@@ -1541,6 +1541,17 @@ const ED_PALETTE = [
   { type:TILE_GRASS, modelKey:'tower_square_roof_a',   label:'Кв.Кр.A',    icon:'⛩', cat:'🏰 Кв.Башни' },
   { type:TILE_GRASS, modelKey:'tower_square_roof_b',   label:'Кв.Кр.B',    icon:'⛩', cat:'🏰 Кв.Башни' },
   { type:TILE_GRASS, modelKey:'tower_square_roof_c',   label:'Кв.Кр.C',    icon:'⛩', cat:'🏰 Кв.Башни' },
+  // === ⛵ Корабли ===
+  { type:TILE_GRASS, modelKey:'pirate_ship_large',         label:'Корабль Б.',    icon:'🚢', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_medium',        label:'Корабль С.',    icon:'🚢', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_small',         label:'Корабль М.',    icon:'⛵', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_ghost',         label:'Призрак',       icon:'👻', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_wreck',         label:'Обломки',       icon:'💀', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_pirate_large',  label:'Пират Б.',      icon:'🏴‍☠️', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_pirate_medium', label:'Пират С.',      icon:'🏴‍☠️', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_ship_pirate_small',  label:'Пират М.',      icon:'🏴‍☠️', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_boat_row_large',     label:'Лодка Б.',      icon:'🛶', cat:'⛵ Корабли' },
+  { type:TILE_GRASS, modelKey:'pirate_boat_row_small',     label:'Лодка М.',      icon:'🛶', cat:'⛵ Корабли' },
   // === 🏴‍☠️ ПИРАТЫ — Декор ===
   { type:TILE_GRASS, modelKey:'pirate_barrel',                  label:'Бочка',        icon:'🪵', cat:'🏴‍☠️ Пираты' },
   { type:TILE_GRASS, modelKey:'pirate_crate',                   label:'Ящик',          icon:'📦', cat:'🏴‍☠️ Пираты' },
@@ -2364,7 +2375,7 @@ function placeTower(row, col, def) {
 
   // ── Убираем zone_marker с этой клетки ───────────────────────
   const zoneMarker = _sceneObjects.find(o =>
-    o.userData && o.userData.type === 'zone_marker' &&
+    o.userData && o.userData.tileSubtype === 'zone_marker' &&
     o.userData.row === row && o.userData.col === col
   );
   if (zoneMarker) {
@@ -3445,7 +3456,7 @@ function onCanvasClick(e) {
   if (hitTile) {
     const { row, col, tileType } = hitTile.userData;
     
-    if (selectedTowerType && tileType === TILE_GRASS) {
+    if (selectedTowerType && (tileType === TILE_ZONE || tileType === TILE_GRASS)) {
       placeTower(row, col, selectedTowerType);
       return;
     }
@@ -3518,7 +3529,7 @@ function onMouseMove(e) {
   for (const hit of intersects) {
     let obj = hit.object;
     while (obj && !obj.userData.type) obj = obj.parent;
-    if (obj && obj.userData.tileType === TILE_GRASS) {
+    if (obj && (obj.userData.tileType === TILE_ZONE || obj.userData.tileType === TILE_GRASS)) {
       showHoverRange(obj.userData.row, obj.userData.col, selectedTowerType);
       return;
     }
@@ -4000,6 +4011,15 @@ async function main() {
     animal_monkey: 'assets/td/animal-monkey.glb',
     // === PIRATE KIT ===
     pirate_barrel: 'assets/pirate/barrel.glb',
+    // === PIRATE SHIPS ===
+    pirate_ship_large: 'assets/pirate/ship-large.glb',
+    pirate_ship_medium: 'assets/pirate/ship-medium.glb',
+    pirate_ship_small: 'assets/pirate/ship-small.glb',
+    pirate_ship_ghost: 'assets/pirate/ship-ghost.glb',
+    pirate_ship_wreck: 'assets/pirate/ship-wreck.glb',
+    pirate_ship_pirate_large: 'assets/pirate/ship-pirate-large.glb',
+    pirate_ship_pirate_medium: 'assets/pirate/ship-pirate-medium.glb',
+    pirate_ship_pirate_small: 'assets/pirate/ship-pirate-small.glb',
     pirate_boat_row_large: 'assets/pirate/boat-row-large.glb',
     pirate_boat_row_small: 'assets/pirate/boat-row-small.glb',
     pirate_cannon: 'assets/pirate/cannon.glb',
