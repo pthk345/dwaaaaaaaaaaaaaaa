@@ -2967,91 +2967,102 @@ let rangeRing = null;
 window._wobbleObjects = []; // { obj, phase, speed, amp, yMin, yMax }
 window._wobbleTime = 0;
 
-// Создаёт ShaderMaterial с wobble из оригинального материала
+// Создаёт материал с wobble через onBeforeCompile —
+// Three.js сам считает всё освещение (hemi/dir/shadow), мы только деформируем вершины
 function makeWobbleMaterial(origMat, phase, speed, amp) {
-  const vert = `
-    uniform float uTime;
-    uniform float uPhase;
-    uniform float uSpeed;
-    uniform float uAmp;
-    uniform float uYMin;
-    uniform float uYMax;
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      vec3 pos = position;
-      // Маска: 0 у основания → 1 у кроны
-      float mask = smoothstep(uYMin + (uYMax - uYMin)*0.25,
-                              uYMin + (uYMax - uYMin)*0.75,
-                              position.y);
-      float windX = sin(uTime * uSpeed + uPhase) * uAmp * mask;
-      float windZ = sin(uTime * uSpeed * 0.7 + uPhase + 1.3) * uAmp * 0.6 * mask;
-      pos.x += windX;
-      pos.z += windZ;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-    }
-  `;
-  const frag = `
-    uniform vec3 uColor;
-    uniform sampler2D uMap;
-    uniform int uHasMap;
-    varying vec2 vUv;
-    void main() {
-      vec3 col = uColor;
-      if (uHasMap == 1) col *= texture2D(uMap, vUv).rgb;
-      // Без затемнения — полный цвет как у MeshBasicMaterial
-      gl_FragColor = vec4(col, 1.0);
-    }
-  `;
-  const uniforms = {
-    uTime:   { value: 0 },
-    uPhase:  { value: phase },
-    uSpeed:  { value: speed },
-    uAmp:    { value: amp },
-    uYMin:   { value: 0 },
-    uYMax:   { value: 1 },
-    uColor:  { value: origMat.color ? origMat.color.clone() : new THREE.Color(0x7bc965) },
-    uMap:    { value: origMat.map || null },
-    uHasMap: { value: origMat.map ? 1 : 0 },
+  const mat = origMat.clone();
+  if (origMat.map) { mat.map = origMat.map; mat.needsUpdate = true; }
+
+  const wobbleUniforms = {
+    uTime:  { value: 0 },
+    uPhase: { value: phase },
+    uSpeed: { value: speed },
+    uAmp:   { value: amp },
+    uYMin:  { value: 0 },
+    uYMax:  { value: 1 },
   };
-  const mat = new THREE.ShaderMaterial({ vertexShader: vert, fragmentShader: frag, uniforms });
-  mat.side = origMat.side || THREE.FrontSide;
+
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, wobbleUniforms);
+    shader.vertexShader = `
+      uniform float uTime;
+      uniform float uPhase;
+      uniform float uSpeed;
+      uniform float uAmp;
+      uniform float uYMin;
+      uniform float uYMax;
+    ` + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `
+      vec3 transformed = vec3(position);
+      float mask = smoothstep(
+        uYMin + (uYMax - uYMin) * 0.25,
+        uYMin + (uYMax - uYMin) * 0.75,
+        position.y
+      );
+      transformed.x += sin(uTime * uSpeed + uPhase) * uAmp * mask;
+      transformed.z += sin(uTime * uSpeed * 0.7 + uPhase + 1.3) * uAmp * 0.6 * mask;
+      `
+    );
+    mat._wobbleShaderUniforms = shader.uniforms;
+  };
+  mat.customProgramCacheKey = () => `wobble_${phase.toFixed(3)}_${speed.toFixed(3)}`;
   return mat;
 }
 
-// Применяет wobble к объекту: заменяет материалы всех мешей на shader
+// Применяет wobble к объекту: заменяет материалы на onBeforeCompile-версию
 function applyWobble(obj, opts) {
   const { phase, speed, amp } = opts;
 
   const box = new THREE.Box3().setFromObject(obj);
   const invWorld = new THREE.Matrix4().copy(obj.matrixWorld).invert();
   const localBox = box.clone().applyMatrix4(invWorld);
-  const yMin = localBox.min.y;
-  const yMax = localBox.max.y;
 
   obj.traverse(m => {
     if (!m.isMesh) return;
     const origMat = Array.isArray(m.material) ? m.material[0] : m.material;
-    const wMat = makeWobbleMaterial(origMat, phase, speed, amp);
+
+    // Вычисляем Y-диапазон меша в local space объекта для маски кроны
     const meshBox = new THREE.Box3().setFromObject(m);
     const localMeshBox = meshBox.clone().applyMatrix4(invWorld);
-    wMat.uniforms.uYMin.value = localMeshBox.min.y;
-    wMat.uniforms.uYMax.value = localMeshBox.max.y;
+    const yMin = localMeshBox.min.y;
+    const yMax = localMeshBox.max.y;
+
+    const wMat = makeWobbleMaterial(origMat, phase, speed, amp);
+
+    // onBeforeCompile вызовется при первой компиляции и сохранит _wobbleShaderUniforms.
+    // До этого патчим wobbleUniforms напрямую через замыкание в makeWobbleMaterial.
+    // Чтобы передать yMin/yMax ДО компиляции — перезапишем их в том же объекте uniforms.
+    // Доступ через _wobbleInitUniforms, который мы сохраним здесь:
+    wMat._wobbleInitUniforms = { uYMin: yMin, uYMax: yMax };
+
+    // Переопределим onBeforeCompile чтобы подставить правильные yMin/yMax
+    const prevCompile = wMat.onBeforeCompile;
+    wMat.onBeforeCompile = (shader) => {
+      prevCompile(shader);
+      shader.uniforms.uYMin.value = yMin;
+      shader.uniforms.uYMax.value = yMax;
+      wMat._wobbleShaderUniforms = shader.uniforms;
+    };
+
     m._origMaterial = origMat;
     m.material = wMat;
     m._wobbleMat = wMat;
   });
 
-  window._wobbleObjects.push({ obj, phase, speed, amp, yMin, yMax });
+  window._wobbleObjects.push({ obj, phase, speed, amp });
 }
 
-// Обновляет время для всех wobble шейдеров
+// Обновляет uTime для всех wobble материалов
 function updateWobble(dt) {
   window._wobbleTime += dt;
   const t = window._wobbleTime;
   for (const item of window._wobbleObjects) {
     item.obj.traverse(m => {
-      if (m._wobbleMat) m._wobbleMat.uniforms.uTime.value = t;
+      if (m._wobbleMat && m._wobbleMat._wobbleShaderUniforms) {
+        m._wobbleMat._wobbleShaderUniforms.uTime.value = t;
+      }
     });
   }
 }
