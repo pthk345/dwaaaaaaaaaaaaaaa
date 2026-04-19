@@ -706,7 +706,6 @@ class GLBLoader {
           }
         }
         if (mat.doubleSided) m.side = THREE.DoubleSide;
-        if (typeof patchEdge === 'function') patchEdge(m);
         materials.push(m);
       }
     }
@@ -737,7 +736,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : (() => { const _m = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); if (typeof patchEdge === 'function') patchEdge(_m); return _m; })();
+          : new THREE.MeshLambertMaterial({ color: 0x88aa88 });
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -1141,8 +1140,8 @@ function initThree() {
   // bias: небольшой отрицательный убирает shadow acne
   // normalBias: компенсирует артефакты на наклонных поверхностях
   // radius: размытие PCF — чем больше тем мягче тень
-  sunLight.shadow.bias       = -0.0018;
-  sunLight.shadow.normalBias =  0.08;
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
   sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
@@ -3120,8 +3119,6 @@ window._wobbleTime = 0;
 function makeWobbleMaterial(origMat, phase, speed, amp) {
   const mat = origMat.clone();
   if (origMat.map) { mat.map = origMat.map; mat.needsUpdate = true; }
-  // edge highlight уже на origMat — клон не наследует onBeforeCompile, патчим снова
-  if (typeof patchEdge === 'function') patchEdge(mat);
 
   const wobbleUniforms = {
     uTime:  { value: 0 },
@@ -3215,57 +3212,6 @@ function updateWobble(dt) {
       }
     });
   }
-}
-// ══════════════════════════════════════════════════════════════════
-
-
-
-// ══════════════════════════════════════════════════════════════════
-// EDGE HIGHLIGHT — Fresnel-подсветка рёбер (встраивается при создании материала)
-// patchEdge(mat) вызывается ДО первой компиляции шейдера
-// ══════════════════════════════════════════════════════════════════
-function patchEdge(mat) {
-  if (!mat || mat._edgeDone || mat.isShaderMaterial) return;
-  if (mat.side === THREE.BackSide) return;
-  if (mat.transparent && mat.opacity < 0.85) return;
-  mat._edgeDone = true;
-
-  const ESTR = 0.36;
-  const EPOW = 2.6;
-
-  const prevOBC = mat.onBeforeCompile;
-  mat.onBeforeCompile = (shader) => {
-    if (prevOBC) prevOBC(shader);
-
-    shader.uniforms.uEdgeStr = { value: ESTR };
-    shader.uniforms.uEdgePow = { value: EPOW };
-
-    shader.vertexShader   = 'varying vec3 vViewPos;\n' + shader.vertexShader;
-    shader.fragmentShader = 'varying vec3 vViewPos;\n' + shader.fragmentShader;
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <project_vertex>',
-      `#include <project_vertex>
-  vViewPos = - mvPosition.xyz;`
-    );
-
-    shader.fragmentShader = 'uniform float uEdgeStr;\nuniform float uEdgePow;\n'
-      + shader.fragmentShader;
-
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <dithering_fragment>',
-      `#include <dithering_fragment>
-  {
-    vec3 _n = normalize(vNormal);
-    vec3 _v = normalize(vViewPos);
-    float _f = pow(1.0 - abs(dot(_n, _v)), uEdgePow);
-    gl_FragColor.rgb += _f * uEdgeStr;
-  }`
-    );
-  };
-
-  const prevKey = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => '';
-  mat.customProgramCacheKey = () => prevKey() + '_e';
 }
 // ══════════════════════════════════════════════════════════════════
 
