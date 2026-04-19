@@ -1232,44 +1232,54 @@ function initThree() {
     const CX = (GRID_W-1)/2*TILE_SIZE;
     const CZ = (GRID_H-1)/2*TILE_SIZE;
 
-    // ── Кувшинки: 18 штук (17-19), больше больших для красоты ─
-    const LILY_KEYS = ['lilywater','lilywaterbig','lilywaterbig','lilywater','lilywaterbig'];
-    for (let i = 0; i < 18; i++) {
-      const key = LILY_KEYS[Math.floor(rand() * LILY_KEYS.length)];
+    // ── Кувшинки: 17-19 штук, два вида: одиночная + большая ─────
+    // ВАЖНО: сначала scene.add(), потом scaleToWorld() — иначе Box3 пустой!
+    const LILY_COUNT = 17 + Math.floor(rand() * 3); // 17, 18 или 19
+    for (let i = 0; i < LILY_COUNT; i++) {
+      // Два вида: lilywaterbig (большая) ≈ каждая третья
+      const isBig = (i % 3 === 2) || rand() < 0.30;
+      const key = isBig ? 'lilywaterbig' : 'lilywater';
+
       const model = assets.clone(key);
       if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
-      // Размер: кувшинки ~0.5-0.9 units в мире
-      const worldSz = 0.5 + rand() * 0.4;
+      // Сначала добавляем в сцену — без этого Box3.setFromObject даёт пустой бокс
+      scene.add(model);
+
+      // Теперь масштабируем — Box3 работает корректно
+      const worldSz = isBig ? (0.75 + rand() * 0.55) : (0.40 + rand() * 0.38);
       scaleToWorld(model, worldSz);
 
-      // Позиция за пределами острова
-      let px, pz, attempts = 0;
-      do {
-        const angle = rand() * Math.PI * 2;
-        const dist  = ISLAND_R * (1.1 + rand() * 2.5);
-        px = Math.cos(angle) * dist;
-        pz = Math.sin(angle) * dist;
-        attempts++;
-      } while (Math.abs(px) > OCEAN_R || Math.abs(pz) > OCEAN_R && attempts < 20);
+      // Позиция: хаотично вокруг острова, часть близко, часть дальше
+      const angle = rand() * Math.PI * 2;
+      const tD = rand();
+      const dist  = ISLAND_R * (1.05 + tD * tD * 2.0); // квадратичное — скопление у берега
+      const px = Math.cos(angle) * dist + (rand()-0.5) * ISLAND_R * 0.25;
+      const pz = Math.sin(angle) * dist + (rand()-0.5) * ISLAND_R * 0.25;
 
       model.position.set(CX + px, WATER_Y_LIL, CZ + pz);
       model.rotation.y = rand() * Math.PI * 2;
 
+      const spawnX = CX + px;
+      const spawnZ = CZ + pz;
+
       model.userData.lilyT         = rand() * Math.PI * 2;
       model.userData.lilyPhaseX    = rand() * Math.PI * 2;
       model.userData.lilyPhaseZ    = rand() * Math.PI * 2;
-      model.userData.lilySpeed     = 0.3 + rand() * 0.4;   // скорость качания
-      model.userData.lilyAmpX      = 0.05 + rand() * 0.06; // амплитуда наклона X
-      model.userData.lilyAmpZ      = 0.05 + rand() * 0.06; // амплитуда наклона Z
+      model.userData.lilySpeed     = 0.28 + rand() * 0.40;   // скорость качания
+      model.userData.lilyAmpX      = 0.025 + rand() * 0.035; // амплитуда наклона X
+      model.userData.lilyAmpZ      = 0.020 + rand() * 0.030; // амплитуда наклона Z
       model.userData.lilyRotSpeed  = (rand() - 0.5) * 0.008; // медленное вращение Y
-      model.userData.lilyDriftSpd  = 0.04 + rand() * 0.06;   // скорость дрейфа
-      model.userData.lilyDriftAngle= rand() * Math.PI * 2;   // начальное направление
-      model.userData.lilyDriftTurn = (rand() - 0.5) * 0.15;  // поворот траектории/с
-      // Устаревшие поля для совместимости
-      model.userData.lilyDriftX = 0;
-      model.userData.lilyDriftZ = 0;
-      model.userData.baseY      = WATER_Y_LIL;
+      // Течение: каждая кувшинка дрейфует в чуть разных направлениях
+      const currentAngle  = 0.35 + rand() * 0.55;
+      const currentSpeed  = 0.00010 + rand() * 0.00016;
+      model.userData.lilyDriftX  = Math.cos(currentAngle) * currentSpeed;
+      model.userData.lilyDriftZ  = Math.sin(currentAngle) * currentSpeed;
+      // Зацикливание: кувшинка уплыла далеко → возвращается
+      model.userData.spawnX   = spawnX;
+      model.userData.spawnZ   = spawnZ;
+      model.userData.maxDrift = ISLAND_R * 3.2;
+      model.userData.baseY    = WATER_Y_LIL;
       model.userData.isLilypad  = true;
       model.userData.persistent = true;
       model.traverse(m => {
@@ -1280,7 +1290,6 @@ function initThree() {
         }
       });
 
-      scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
@@ -1497,9 +1506,18 @@ function buildMap(g, customCellData) {
 
     // Wobble для деревьев: уникальная фаза на каждую клетку
     if (tt === TILE_TREE) {
-      const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2); // хаотичная фаза
-      const speed = 0.6 + ((r * 7 + c * 13) % 100) / 100 * 0.5; // 0.6–1.1 рад/с
-      const amp   = 0.055 + ((r * 3 + c * 17) % 100) / 100 * 0.04; // 0.055–0.095
+      const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2);
+      const speed = 0.6 + ((r * 7 + c * 13) % 100) / 100 * 0.5;
+      const amp   = 0.055 + ((r * 3 + c * 17) % 100) / 100 * 0.04;
+      applyWobble(obj, { phase, speed, amp });
+    }
+
+    // Wobble для пальм (pirate kit) — та же анимация что у деревьев
+    const _PALM_KEYS = ['pirate_palm_bend','pirate_palm_straight','pirate_palm_detailed_bend','pirate_palm_detailed_straight'];
+    if (key && _PALM_KEYS.includes(key)) {
+      const phase = (r * 3.14 + c * 2.72 + 0.5) % (Math.PI * 2);
+      const speed = 0.5 + ((r * 11 + c * 7) % 100) / 100 * 0.45;
+      const amp   = 0.060 + ((r * 5 + c * 19) % 100) / 100 * 0.045;
       applyWobble(obj, { phase, speed, amp });
     }
 
@@ -2913,11 +2931,26 @@ function buildReflection() {
       if (!child.isMesh || !child.material) return;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       child.material = mats.map(m => {
-        const nm = m.clone();
-        nm.transparent = false;
-        nm.opacity = 1.0;
-        nm.depthWrite = true;
-        nm.side = THREE.BackSide;
+        let nm;
+        // ShaderMaterial (старый wobble) и onBeforeCompile-материалы
+        // не клонируются корректно → берём цвет/текстуру и делаем чистый Lambert
+        if (m.isShaderMaterial || (m.onBeforeCompile && m.onBeforeCompile.toString().length > 10)) {
+          const col = m.uniforms && m.uniforms.uColor
+            ? m.uniforms.uColor.value
+            : (m.color ? m.color.clone() : new THREE.Color(0x7bc965));
+          const map = (m.uniforms && m.uniforms.uMap && m.uniforms.uMap.value)
+            ? m.uniforms.uMap.value
+            : (m.map || null);
+          nm = new THREE.MeshLambertMaterial({ color: col, map: map });
+        } else {
+          nm = m.clone();
+          if (m.map)    nm.map    = m.map;
+          if (m.color)  nm.color.copy(m.color);
+        }
+        nm.transparent  = false;
+        nm.opacity      = 1.0;
+        nm.depthWrite   = true;
+        nm.side         = THREE.BackSide;
         // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
         nm.stencilWrite = true;
         nm.stencilFunc  = THREE.AlwaysStencilFunc;
@@ -2956,77 +2989,63 @@ let rangeRing = null;
 window._wobbleObjects = []; // { obj, phase, speed, amp, baseY }
 window._wobbleTime = 0;
 
-// Создаёт ShaderMaterial с wobble из оригинального MeshLambertMaterial
+// Создаёт wobble-материал через onBeforeCompile — патчит родной MeshLambertMaterial.
+// Это СОХРАНЯЕТ всё нативное освещение Three.js (HemiLight, DirLight, Shadows).
+// ShaderMaterial больше не используется — он ломал яркость и давал чёрное отражение.
 function makeWobbleMaterial(origMat, phase, speed, amp) {
-  // Vertex shader: нижние вершины неподвижны, верхние гнутся
-  // uMask = smoothstep(0..1) по нормализованной высоте → только крона двигается
-  const vert = `
-    uniform float uTime;
-    uniform float uPhase;
-    uniform float uSpeed;
-    uniform float uAmp;
-    uniform float uYMin;  // мин Y объекта в local space
-    uniform float uYMax;  // макс Y объекта
-    varying vec3 vNormal;
-    varying vec2 vUv;
-    void main() {
-      vNormal = normalMatrix * normal;
-      vUv = uv;
-      vec3 pos = position;
-      // Маска: 0 у основания → 1 у кроны, с плавным переходом
-      float mask = smoothstep(uYMin + (uYMax - uYMin)*0.25,
-                              uYMin + (uYMax - uYMin)*0.75,
-                              position.y);
-      // Два синуса — создают «живое» некруговое качание
-      float windX = sin(uTime * uSpeed + uPhase) * uAmp * mask;
-      float windZ = sin(uTime * uSpeed * 0.7 + uPhase + 1.3) * uAmp * 0.6 * mask;
-      pos.x += windX;
-      pos.z += windZ;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-    }
-  `;
-  const frag = `
-    uniform vec3 uColor;
-    uniform sampler2D uMap;
-    uniform int uHasMap;
-    varying vec3 vNormal;
-    varying vec2 vUv;
-    void main() {
-      vec3 col = uColor;
-      if (uHasMap == 1) col *= texture2D(uMap, vUv).rgb;
-      // Lambert с правильным освещением:
-      // Имитируем HemisphereLight(sky=0xc8e8ff, ground=0x8fc870, 0.52)
-      // + DirectionalLight(0xfff4d0, 1.55) + AmbientLight(0.13)
-      vec3 nrm = normalize(vNormal);
-      // Солнце
-      vec3 sunDir = normalize(vec3(-0.35, 0.93, 0.52));
-      float sun = max(dot(nrm, sunDir), 0.0);
-      vec3 sunCol = vec3(1.0, 0.96, 0.82) * 1.55;
-      // Hemisphere: небо сверху, земля снизу
-      float hemi = nrm.y * 0.5 + 0.5; // 0=земля, 1=небо
-      vec3 hemiCol = mix(vec3(0.56, 0.78, 0.44), vec3(0.78, 0.91, 1.0), hemi) * 0.52;
-      // Контровой
-      vec3 rimDir = normalize(vec3(0.55, 0.4, -0.47));
-      float rim = max(dot(nrm, rimDir), 0.0);
-      vec3 rimCol = vec3(0.62, 0.81, 1.0) * 0.38;
-      // Итог: ambient(0.13) + hemi + sun + rim
-      vec3 light = vec3(0.13) + hemiCol + sunCol * sun * 0.7 + rimCol * rim * 0.3;
-      gl_FragColor = vec4(col * light, 1.0);
-    }
-  `;
-  const uniforms = {
-    uTime:   { value: 0 },
-    uPhase:  { value: phase },
-    uSpeed:  { value: speed },
-    uAmp:    { value: amp },
-    uYMin:   { value: 0 },
-    uYMax:   { value: 1 },
-    uColor:  { value: origMat.color ? origMat.color.clone() : new THREE.Color(0x7bc965) },
-    uMap:    { value: origMat.map || null },
-    uHasMap: { value: origMat.map ? 1 : 0 },
+  // Клонируем оригинал, явно копируя все визуальные свойства
+  let mat;
+  if (origMat && origMat.isMaterial) {
+    mat = origMat.clone();
+    if (origMat.map)         mat.map          = origMat.map;
+    if (origMat.color)       mat.color.copy(origMat.color);
+    if (origMat.emissive)    mat.emissive.copy(origMat.emissive);
+    if (origMat.emissiveMap) mat.emissiveMap  = origMat.emissiveMap;
+    mat.emissiveIntensity = origMat.emissiveIntensity !== undefined ? origMat.emissiveIntensity : 0;
+    mat.side        = origMat.side !== undefined ? origMat.side : THREE.FrontSide;
+    mat.transparent = origMat.transparent || false;
+    mat.opacity     = origMat.opacity     !== undefined ? origMat.opacity : 1.0;
+  } else {
+    mat = new THREE.MeshLambertMaterial({ color: 0x7bc965 });
+  }
+
+  const wUniforms = {
+    uTime:  { value: 0 },
+    uPhase: { value: phase },
+    uSpeed: { value: speed },
+    uAmp:   { value: amp },
+    uYMin:  { value: 0 },
+    uYMax:  { value: 1 },
   };
-  const mat = new THREE.ShaderMaterial({ vertexShader:vert, fragmentShader:frag, uniforms });
-  mat.side = origMat.side || THREE.FrontSide;
+  mat.userData._wobbleU = wUniforms;
+
+  // onBeforeCompile: инжектируем displacement в нативный vertex shader Lambert
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, wUniforms);
+    shader.vertexShader =
+      `uniform float uTime;
+` +
+      `uniform float uPhase;
+` +
+      `uniform float uSpeed;
+` +
+      `uniform float uAmp;
+` +
+      `uniform float uYMin;
+` +
+      `uniform float uYMax;
+` +
+      shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      float _wMask = smoothstep(uYMin+(uYMax-uYMin)*0.25, uYMin+(uYMax-uYMin)*0.75, position.y);
+      transformed.x += sin(uTime*uSpeed + uPhase)           * uAmp     * _wMask;
+      transformed.z += sin(uTime*uSpeed*0.7 + uPhase + 1.3) * uAmp*0.6 * _wMask;`
+    );
+    mat.userData._compiledShader = shader;
+  };
+  mat.needsUpdate = true;
   return mat;
 }
 
@@ -3066,7 +3085,17 @@ function updateWobble(dt) {
   const t = window._wobbleTime;
   for (const item of window._wobbleObjects) {
     item.obj.traverse(m => {
-      if (m._wobbleMat) m._wobbleMat.uniforms.uTime.value = t;
+      if (!m.isMesh || !m.material) return;
+      // Поддержка как старых _wobbleMat так и новых onBeforeCompile материалов
+      if (m._wobbleMat && m._wobbleMat.uniforms) {
+        m._wobbleMat.uniforms.uTime.value = t;
+      }
+      const wu = m.material.userData && m.material.userData._wobbleU;
+      if (wu) {
+        wu.uTime.value = t;
+        if (m.material.userData._compiledShader)
+          m.material.userData._compiledShader.uniforms.uTime.value = t;
+      }
     });
   }
 }
@@ -3102,32 +3131,43 @@ function gameLoop(ts) {
 
   // ── Анимация кувшинок и камышей ───────────────────────────
   if (window._lilypadMeshes && window._lilypadMeshes.length > 0) {
-    const realDt = Math.min((ts - lastTime) / 1000, 0.1); // без gameSpeed — на воде независимо
+    const rawDt = Math.min((ts - (window._lastLilyTs || ts)) / 1000, 0.05);
+    window._lastLilyTs = ts;
     for (const m of window._lilypadMeshes) {
       if (!m.userData.isLilypad) continue;
-      m.userData.lilyT += realDt * m.userData.lilySpeed;
+      m.userData.lilyT += rawDt * (m.userData.lilySpeed || 0.35);
       const t = m.userData.lilyT;
 
-      // Покачивание по X и Z — два синуса с разными частотами для «живости»
-      m.rotation.x = Math.sin(t + m.userData.lilyPhaseX) * m.userData.lilyAmpX
-                   + Math.sin(t * 1.7 + m.userData.lilyPhaseX * 0.5) * m.userData.lilyAmpX * 0.4;
-      m.rotation.z = Math.cos(t * 0.73 + m.userData.lilyPhaseZ) * m.userData.lilyAmpZ
-                   + Math.cos(t * 1.3 + m.userData.lilyPhaseZ * 0.7) * m.userData.lilyAmpZ * 0.3;
+      // Покачивание по X и Z — два слоя синусов для «живого» эффекта
+      m.rotation.x = Math.sin(t   + m.userData.lilyPhaseX)          * m.userData.lilyAmpX
+                   + Math.sin(t*2.3 + m.userData.lilyPhaseX * 0.7)  * m.userData.lilyAmpX * 0.35;
+      m.rotation.z = Math.cos(t*0.8 + m.userData.lilyPhaseZ)        * m.userData.lilyAmpZ
+                   + Math.cos(t*1.7 + m.userData.lilyPhaseZ * 0.5)  * m.userData.lilyAmpZ * 0.25;
 
-      // Волновое покачивание по Y — как на воде
+      // Волна по Y — кувшинка приподнимается на гребне
       m.position.y = m.userData.baseY
-                   + Math.sin(t * 0.9 + m.userData.lilyPhaseX) * 0.018
-                   + Math.sin(t * 1.6 + m.userData.lilyPhaseZ * 1.2) * 0.008;
+                   + Math.sin(t*0.7  + m.userData.lilyPhaseX) * 0.018
+                   + Math.sin(t*1.5  + m.userData.lilyPhaseZ) * 0.008
+                   + Math.sin(t*0.31 + (m.userData.lilyPhaseX||0)*0.3) * 0.005;
 
-      // Лёгкое вращение вокруг Y — кувшинки медленно крутятся на воде
-      m.rotation.y += realDt * m.userData.lilyRotSpeed;
+      // Медленное вращение вокруг Y (кувшинку кружит течением)
+      if (m.userData.lilyRotSpeed) m.rotation.y += rawDt * m.userData.lilyRotSpeed;
 
-      // Дрейф по синусоидальной траектории — волнообразно, не прямолинейно
-      m.userData.lilyDriftAngle = (m.userData.lilyDriftAngle || 0)
-                                + realDt * m.userData.lilyDriftTurn;
-      const driftAngle = m.userData.lilyDriftAngle;
-      m.position.x += Math.cos(driftAngle) * m.userData.lilyDriftSpd * realDt;
-      m.position.z += Math.sin(driftAngle) * m.userData.lilyDriftSpd * realDt;
+      // ТЕЧЕНИЕ: дрейф + зацикливание
+      if (m.userData.lilyDriftX || m.userData.lilyDriftZ) {
+        m.position.x += m.userData.lilyDriftX;
+        m.position.z += m.userData.lilyDriftZ;
+        // Если уплыла слишком далеко — мягко возвращаем с обратной стороны
+        if (m.userData.spawnX !== undefined) {
+          const ddx = m.position.x - m.userData.spawnX;
+          const ddz = m.position.z - m.userData.spawnZ;
+          const dist2 = Math.sqrt(ddx*ddx + ddz*ddz);
+          if (dist2 > (m.userData.maxDrift || 20)) {
+            m.position.x = m.userData.spawnX - ddx * 0.97;
+            m.position.z = m.userData.spawnZ - ddz * 0.97;
+          }
+        }
+      }
     }
   }
 
