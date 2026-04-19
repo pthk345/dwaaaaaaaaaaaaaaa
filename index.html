@@ -1160,52 +1160,133 @@ function initThree() {
 
   // ══════════════════════════════════════════════════════════════
 
-  // ── ОКЕАН: плоскость над отражением ──────────────────────────
-  // ── ВОДА + ПЕНА: две плоскости между островом и отражением ──
-  const WATER_Y = _MIRROR_Y - 0.002; // вода чуть ниже зеркальной плоскости
-  const FOAM_Y  = _MIRROR_Y + 0.003; // пена чуть выше воды
+  // ── OCEAN: Voronoi anime cel-shaded water (from water-anime-shader) ──
+  const WATER_Y = _MIRROR_Y - 0.002;
 
-  // Загружаем воду
-  new THREE.TextureLoader().load('assets/water.png', (waterTex) => {
-    waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
-    waterTex.repeat.set(6, 6);
-    const waterMat = new THREE.MeshBasicMaterial({
-      map: waterTex,
-      transparent: true,
-      opacity: 0.6,      // 60% непрозрачности = выкручено на 40%
-      depthWrite: false,
-    });
-    const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), waterMat);
-    waterMesh.rotation.x = -Math.PI / 2;
-    waterMesh.position.set((GRID_W-1)/2*TILE_SIZE, WATER_Y, (GRID_H-1)/2*TILE_SIZE);
-    waterMesh.renderOrder = 5;
-    waterMesh.userData.persistent = true;
-    scene.add(waterMesh);
-    window._waterMesh = waterMesh;
-    window._waterT = 0;
-    if (!_persistentObjects.includes(waterMesh)) _persistentObjects.push(waterMesh);
+  const _waterVert = `
+    varying vec2 vWorldPos;
+    void main() {
+      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      vWorldPos     = worldPos.xz;
+      gl_Position   = projectionMatrix * viewMatrix * worldPos;
+    }
+  `;
+
+  const _waterFrag = `
+    uniform float uTime;
+    uniform float uScale;
+    uniform float uCellSpeed;
+    uniform float uFlowX;
+    uniform float uFlowZ;
+    uniform float uEdgeThreshold;
+    uniform float uEdgeSoftness;
+    uniform vec3  uDeepColor;
+    uniform vec3  uMidColor;
+    uniform vec3  uHighlight;
+    uniform float uFadeDistance;
+    uniform float uFadeStrength;
+    uniform vec2  uCamXZ;
+
+    varying vec2 vWorldPos;
+
+    vec2 hash2(vec2 p) {
+      p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+      return fract(sin(p) * 43758.5453);
+    }
+
+    float smin(float a, float b, float k) {
+      float h = max(k - abs(a - b), 0.0) / k;
+      return min(a, b) - h * h * h * k / 6.0;
+    }
+
+    vec2 cellPt(vec2 seed) {
+      return 0.5 + 0.5 * sin(uTime * uCellSpeed + 6.2831 * seed);
+    }
+
+    float voronoiF1(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      float md = 8.0;
+      for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+          vec2 n  = vec2(float(x), float(y));
+          vec2 pt = cellPt(hash2(i + n));
+          md = min(md, length(n + pt - f));
+        }
+      return md;
+    }
+
+    float voronoiSF1(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      float res = 8.0;
+      for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+          vec2 n  = vec2(float(x), float(y));
+          vec2 pt = cellPt(hash2(i + n));
+          res = smin(res, length(n + pt - f), 0.4);
+        }
+      return res;
+    }
+
+    void main() {
+      vec2  uv   = vWorldPos * uScale + vec2(uFlowX, uFlowZ) * uTime;
+      float f1   = voronoiF1(uv);
+      float sf1  = voronoiSF1(uv);
+      float edge = f1 - sf1;
+
+      // 3-stop color ramp: deep → mid → highlight
+      float t1 = smoothstep(uEdgeThreshold - uEdgeSoftness,
+                             uEdgeThreshold + uEdgeSoftness, edge);
+      float t2 = smoothstep(uEdgeThreshold + uEdgeSoftness,
+                             uEdgeThreshold + uEdgeSoftness * 3.0, edge);
+      vec3 color = mix(uDeepColor, uMidColor, t1);
+      color      = mix(color,      uHighlight, t2 * 0.55);
+
+      // Distance fade к горизонту
+      float dist  = length(vWorldPos - uCamXZ);
+      float fade  = 1.0 - pow(clamp(dist / uFadeDistance, 0.0, 1.0), uFadeStrength);
+
+      gl_FragColor = vec4(color, fade * 0.92);
+    }
+  `;
+
+  const waterUniforms = {
+    uTime:          { value: 0 },
+    uScale:         { value: 0.13 },       // масштаб ячеек
+    uCellSpeed:     { value: 0.38 },       // скорость анимации ячеек
+    uFlowX:         { value: 0.022 },      // горизонтальный дрейф
+    uFlowZ:         { value: -0.09 },      // вертикальный дрейф
+    uEdgeThreshold: { value: 0.07 },       // порог «блика»
+    uEdgeSoftness:  { value: 0.035 },      // мягкость края
+    uDeepColor:     { value: new THREE.Color(0x3ab5e8) }, // основной цвет воды
+    uMidColor:      { value: new THREE.Color(0x5ecfef) }, // средний тон
+    uHighlight:     { value: new THREE.Color(0xa8ecff) }, // блик (гребни)
+    uFadeDistance:  { value: 220.0 },
+    uFadeStrength:  { value: 2.0 },
+    uCamXZ:         { value: new THREE.Vector2() },
+  };
+
+  const waterMat = new THREE.ShaderMaterial({
+    vertexShader:   _waterVert,
+    fragmentShader: _waterFrag,
+    uniforms:       waterUniforms,
+    transparent:    true,
+    depthWrite:     false,
+    side:           THREE.FrontSide,
   });
 
-  // Загружаем пену (PNG с альфа)
-  new THREE.TextureLoader().load('assets/foam.png', (foamTex) => {
-    foamTex.wrapS = foamTex.wrapT = THREE.RepeatWrapping;
-    foamTex.repeat.set(5, 5);
-    const foamMat = new THREE.MeshBasicMaterial({
-      map: foamTex,
-      transparent: true,
-      alphaTest: 0.05,
-      depthWrite: false,
-    });
-    const foamMesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), foamMat);
-    foamMesh.rotation.x = -Math.PI / 2;
-    foamMesh.position.set((GRID_W-1)/2*TILE_SIZE, FOAM_Y, (GRID_H-1)/2*TILE_SIZE);
-    foamMesh.renderOrder = 6;
-    foamMesh.userData.persistent = true;
-    scene.add(foamMesh);
-    window._foamMesh = foamMesh;
-    window._foamT = 0;
-    if (!_persistentObjects.includes(foamMesh)) _persistentObjects.push(foamMesh);
-  });
+  const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600, 1, 1), waterMat);
+  waterMesh.rotation.x = -Math.PI / 2;
+  waterMesh.position.set((GRID_W-1)/2*TILE_SIZE, WATER_Y, (GRID_H-1)/2*TILE_SIZE);
+  waterMesh.renderOrder = 5;
+  waterMesh.frustumCulled = false;
+  waterMesh.userData.persistent = true;
+  scene.add(waterMesh);
+  window._waterMesh = waterMesh;
+  window._waterT = 0;
+  if (!_persistentObjects.includes(waterMesh)) _persistentObjects.push(waterMesh);
+
+  // Пена убрана — шейдер сам создаёт блики на гребнях
+  window._foamMesh = null;
 
   // ── Кувшинки на воде: спавним после загрузки ассетов ─────
   window._lilypadMeshes = [];
@@ -3074,23 +3155,17 @@ function gameLoop(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1) * gameSpeed;
   lastTime = ts;
 
-  // Анимация воды — медленный дрейф UV
-  if (window._waterMesh && window._waterMesh.material.map) {
-    window._waterT = (window._waterT || 0) + 0.00015;
-    window._waterMesh.material.map.offset.set(
-      window._waterT * 0.3 % 1,
-      window._waterT * 0.2 % 1
-    );
+  // Анимация воды — Voronoi shader: обновляем время и позицию камеры
+  if (window._waterMesh && window._waterMesh.material.uniforms) {
+    const wu = window._waterMesh.material.uniforms;
+    wu.uTime.value += dt;
+    wu.uCamXZ.value.set(camera.position.x, camera.position.z);
+    // Плоскость следует за камерой чтобы вода была везде
+    window._waterMesh.position.x = camera.position.x;
+    window._waterMesh.position.z = camera.position.z;
   }
 
-  // Анимация пены — очень медленно плывёт в одну сторону (по диагонали)
-  if (window._foamMesh && window._foamMesh.material.map) {
-    window._foamT = (window._foamT || 0) + 0.00006;
-    window._foamMesh.material.map.offset.set(
-      window._foamT % 1,
-      window._foamT * 0.6 % 1
-    );
-  }
+  // Пена отключена (шейдер создаёт блики сам)
 
   // ── Wobble анимация растительности ────────────────────────────
   updateWobble(Math.min((ts - (window._lastWobbleTs || ts)) / 1000, 0.05));
