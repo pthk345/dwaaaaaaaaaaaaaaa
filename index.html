@@ -3215,6 +3215,85 @@ function updateWobble(dt) {
 }
 // ══════════════════════════════════════════════════════════════════
 
+
+// ══════════════════════════════════════════════════════════════════
+// EDGE HIGHLIGHT — Fresnel-подсветка рёбер моделей
+// Добавляет тонкий светлый контур по рёбрам (dot(N,V) → rim)
+// Создаёт иллюзию сглаженности без изменения геометрии
+// ══════════════════════════════════════════════════════════════════
+function applyEdgeHighlight(targetScene) {
+  const EDGE_STR   = 0.38;  // яркость подсветки рёбер (0=нет, 1=очень сильно)
+  const EDGE_POWER = 2.8;   // резкость перехода (выше = уже полоска)
+
+  targetScene.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(mat => {
+      // Пропускаем: ShaderMaterial (вода), BackSide (отражение), уже патченные
+      if (!mat || mat.isShaderMaterial) return;
+      if (mat.side === THREE.BackSide) return;
+      if (mat._edgeHighlightApplied) return;
+      // Пропускаем прозрачные (вода, пена)
+      if (mat.transparent && mat.opacity < 0.9) return;
+
+      mat._edgeHighlightApplied = true;
+
+      const prevOBC = mat.onBeforeCompile;
+      mat.onBeforeCompile = (shader) => {
+        // Сначала выполняем предыдущий патч (wobble и др.)
+        if (prevOBC) prevOBC(shader);
+
+        // Добавляем uniform силы подсветки
+        shader.uniforms.uEdgeStr   = { value: EDGE_STR };
+        shader.uniforms.uEdgePow   = { value: EDGE_POWER };
+
+        // Объявляем uniforms в fragment shader
+        shader.fragmentShader = `
+uniform float uEdgeStr;
+uniform float uEdgePow;
+` + shader.fragmentShader;
+
+        // Добавляем varying vViewDir из vertex shader
+        shader.vertexShader = `
+varying vec3 vViewDir;
+` + shader.vertexShader;
+
+        // В конце vertex shader записываем направление к камере
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <fog_vertex>',
+          `#include <fog_vertex>
+  vViewDir = normalize(cameraPosition - (modelMatrix * vec4(position, 1.0)).xyz);`
+        );
+
+        // Объявляем varying в fragment shader
+        shader.fragmentShader = `
+varying vec3 vViewDir;
+` + shader.fragmentShader;
+
+        // Вставляем Fresnel-подсветку перед финальным gl_FragColor
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+  // Fresnel edge highlight: рёбра (где N⊥V) → ярче
+  vec3 _nrm = normalize( vNormal );
+  float _vdotn = abs( dot( _nrm, normalize(vViewDir) ) );
+  float _rim = pow( 1.0 - _vdotn, uEdgePow );
+  gl_FragColor.rgb += _rim * uEdgeStr;`
+        );
+      };
+
+      // customProgramCacheKey чтобы Three.js не кешировал неправильно
+      const prevKey = mat.customProgramCacheKey;
+      mat.customProgramCacheKey = () => {
+        const base = prevKey ? prevKey() : '';
+        return base + '_edge';
+      };
+      mat.needsUpdate = true;
+    });
+  });
+}
+// ══════════════════════════════════════════════════════════════════
+
 function gameLoop(ts) {
   animFrameId = requestAnimationFrame(gameLoop);
   
@@ -4200,6 +4279,8 @@ function startGame(mapGrid, customCellData, freeObjsData) {
     });
     buildReflection(); // перестроим отражение с учётом freeObjs
   }
+  // Применяем Fresnel edge highlight на все меши карты
+  applyEdgeHighlight(scene);
   
   // Show game UI
   document.getElementById('main-menu').classList.add('hidden');
