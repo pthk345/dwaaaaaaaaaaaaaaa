@@ -1230,36 +1230,38 @@ function initThree() {
     void main() {
       vec2  uv   = vWorldPos * uScale + vec2(uFlowX, uFlowZ) * uTime;
       float f1   = voronoiF1(uv);
-      float sf1  = voronoiSF1(uv);
-      float edge = f1 - sf1;
 
-      // 3-stop color ramp: deep → mid → highlight
-      float t1 = smoothstep(uEdgeThreshold - uEdgeSoftness,
-                             uEdgeThreshold + uEdgeSoftness, edge);
-      float t2 = smoothstep(uEdgeThreshold + uEdgeSoftness,
-                             uEdgeThreshold + uEdgeSoftness * 3.0, edge);
-      vec3 color = mix(uDeepColor, uMidColor, t1);
-      color      = mix(color,      uHighlight, t2 * 0.55);
+      // Круглые пузырьки пены: f1 — расстояние до ближайшей точки Вороного.
+      // Маленькое f1 = центр пузырька = белая пена.
+      float bubble = 1.0 - smoothstep(
+        uEdgeThreshold - uEdgeSoftness,
+        uEdgeThreshold + uEdgeSoftness,
+        f1
+      );
+
+      // Вода + белые кружки поверх
+      vec3 color = mix(uDeepColor, uMidColor, bubble * 0.25);
+      color      = mix(color, uHighlight, bubble);
 
       // Distance fade к горизонту
-      float dist  = length(vWorldPos - uCamXZ);
-      float fade  = 1.0 - pow(clamp(dist / uFadeDistance, 0.0, 1.0), uFadeStrength);
+      float dist = length(vWorldPos - uCamXZ);
+      float fade = 1.0 - pow(clamp(dist / uFadeDistance, 0.0, 1.0), uFadeStrength);
 
-      gl_FragColor = vec4(color, fade * 0.92);
+      gl_FragColor = vec4(color, fade * 0.45);
     }
   `;
 
   const waterUniforms = {
     uTime:          { value: 0 },
-    uScale:         { value: 0.13 },       // масштаб ячеек
+    uScale:         { value: 0.18 },       // чуть крупнее → пузырьки меньше
     uCellSpeed:     { value: 0.38 },       // скорость анимации ячеек
     uFlowX:         { value: 0.022 },      // горизонтальный дрейф
     uFlowZ:         { value: -0.09 },      // вертикальный дрейф
-    uEdgeThreshold: { value: 0.07 },       // порог «блика»
-    uEdgeSoftness:  { value: 0.035 },      // мягкость края
-    uDeepColor:     { value: new THREE.Color(0x3ab5e8) }, // основной цвет воды
-    uMidColor:      { value: new THREE.Color(0x5ecfef) }, // средний тон
-    uHighlight:     { value: new THREE.Color(0xa8ecff) }, // блик (гребни)
+    uEdgeThreshold: { value: 0.30 },       // радиус круглого пузырька
+    uEdgeSoftness:  { value: 0.06 },       // мягкость края кружка
+    uDeepColor:     { value: new THREE.Color(0x7dd9f5) }, // светлый голубой
+    uMidColor:      { value: new THREE.Color(0x9de6f8) }, // ещё светлее
+    uHighlight:     { value: new THREE.Color(0xffffff) }, // пена — чисто белая
     uFadeDistance:  { value: 220.0 },
     uFadeStrength:  { value: 2.0 },
     uCamXZ:         { value: new THREE.Vector2() },
