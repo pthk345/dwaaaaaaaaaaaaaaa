@@ -3218,90 +3218,85 @@ function updateWobble(dt) {
 // ══════════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════════
-// CEL-SHADING OUTLINE — Inverted Hull шейдер
-// Принцип: клонируем каждый меш тайла, рендерим его BackSide,
-// в вертексном шейдере толкаем вершины наружу по нормали.
-// Результат: тонкая тёмная обводка вокруг каждого объекта.
-// Но так как все тайлы плотно прилегают друг к другу —
-// внутренние рёбра между ними перекрываются самими мешами,
-// и видна только ВНЕШНЯЯ обводка острова. Никакой сетки!
+// CEL-SHADING OUTLINE — силуэт острова через плоский шейдер
+//
+// Подход: строим одну плоскую сетку из квадратов точно по форме
+// острова (tileMeshGrid), слегка увеличиваем её наружу (expand),
+// рендерим тёмным цветом ПОД тайлами. Никаких inverted-hull на
+// отдельных мешах → никакой внутренней сетки, никаких артефактов
+// на деревьях.
 // ══════════════════════════════════════════════════════════════════
 
-const _CEL_OUTLINE_VERT = `
-  uniform float uThickness;
-  void main() {
-    // Толкаем вершину наружу по нормали в clip space
-    vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    vec3 clipNorm = normalize((projectionMatrix * modelViewMatrix * vec4(normal, 0.0)).xyz);
-    // Смещение в clip space — одинаковая толщина независимо от расстояния
-    clipPos.xy += clipNorm.xy * uThickness * clipPos.w;
-    gl_Position = clipPos;
-  }
-`;
-
-const _CEL_OUTLINE_FRAG = `
-  uniform vec3 uColor;
-  uniform float uAlpha;
-  void main() {
-    gl_FragColor = vec4(uColor, uAlpha);
-  }
-`;
-
-// Создаёт outline-клон объекта и добавляет его в сцену
-function addCelOutline(obj, thickness, color) {
-  obj.updateMatrixWorld(true);
-  obj.traverse(child => {
-    if (!child.isMesh) return;
-    if (!child.geometry || !child.geometry.attributes.normal) return;
-    // Пропускаем спрайты здоровья, частицы и прочий не-тайловый мусор
-    if (child.geometry.type === 'SphereGeometry' && child.geometry.parameters && child.geometry.parameters.radius < 0.1) return;
-
-    const outlineMat = new THREE.ShaderMaterial({
-      vertexShader:   _CEL_OUTLINE_VERT,
-      fragmentShader: _CEL_OUTLINE_FRAG,
-      uniforms: {
-        uThickness: { value: thickness },
-        uColor:     { value: new THREE.Color(color) },
-        uAlpha:     { value: 1.0 },
-      },
-      side:        THREE.BackSide,
-      depthWrite:  true,
-      transparent: false,
-    });
-
-    const outlineMesh = new THREE.Mesh(child.geometry, outlineMat);
-    // Копируем локальную трансформацию — outline живёт в том же родителе
-    outlineMesh.position.copy(child.position);
-    outlineMesh.rotation.copy(child.rotation);
-    outlineMesh.scale.copy(child.scale);
-    outlineMesh.userData.isCelOutline = true;
-    outlineMesh.renderOrder = -1;
-
-    // Добавляем как брат (sibling) в того же родителя что и child
-    const parent = child.parent || obj;
-    parent.add(outlineMesh);
-  });
-}
-
-// Вызывается после buildMap — обходит все тайлы и добавляет outline
 function buildCelOutlines() {
-  // Удаляем старые outline-меши если есть
-  const toRemove = scene.children.filter(o => o.userData.isCelOutline);
-  toRemove.forEach(o => scene.remove(o));
+  // Убираем старый outline если есть
+  const old = scene.children.filter(o => o.userData.isCelOutline);
+  old.forEach(o => { scene.remove(o); });
 
-  // Обновляем мировые матрицы перед чтением
-  scene.updateMatrixWorld(true);
+  const S   = TILE_SIZE;          // размер тайла
+  const EXP = S * 0.13;           // насколько выступает наружу (13% от тайла)
+  const Y   = -0.01;              // чуть ниже поверхности тайлов
 
-  // Только тайлы острова (не башни, не враги, не частицы)
-  // Толщина в clip-space единицах — 0.004 даёт ~2-3px линию
-  const OUTLINE_THICKNESS = 0.006;
-  const OUTLINE_COLOR     = 0x1a1020; // очень тёмный, почти чёрный с синеватым оттенком
+  // Карта занятых клеток
+  const occupied = (r, c) =>
+    r >= 0 && r < GRID_H && c >= 0 && c < GRID_W && tileMeshGrid[r] && tileMeshGrid[r][c] !== null;
 
-  tileObjects.forEach(obj => {
-    if (!obj.userData.type || obj.userData.type !== 'tile') return;
-    if (obj.userData.isIslandOutline || obj.userData.isCelOutline) return;
-    addCelOutline(obj, OUTLINE_THICKNESS, OUTLINE_COLOR);
+  const verts = [];
+  const idx   = [];
+
+  // Для каждой занятой клетки строим расширенный quad.
+  // Каждый quad — отдельный прямоугольник, но смежные стороны
+  // между занятыми соседями НЕ добавляем расширение — только наружу.
+  for (let r = 0; r < GRID_H; r++) {
+    for (let c = 0; c < GRID_W; c++) {
+      if (!occupied(r, c)) continue;
+
+      // Базовые координаты клетки
+      const cx = c * S;
+      const cz = r * S;
+
+      // Расширяем каждую сторону только если сосед пустой
+      const expN = occupied(r-1, c) ? 0 : EXP;
+      const expS = occupied(r+1, c) ? 0 : EXP;
+      const expW = occupied(r,  c-1) ? 0 : EXP;
+      const expE = occupied(r,  c+1) ? 0 : EXP;
+
+      const x0 = cx - S*0.5 - expW;
+      const x1 = cx + S*0.5 + expE;
+      const z0 = cz - S*0.5 - expN;
+      const z1 = cz + S*0.5 + expS;
+
+      const base = verts.length / 3;
+      // 4 угла quad
+      verts.push(x0, Y, z0);  // 0: NW
+      verts.push(x1, Y, z0);  // 1: NE
+      verts.push(x1, Y, z1);  // 2: SE
+      verts.push(x0, Y, z1);  // 3: SW
+
+      // 2 треугольника
+      idx.push(base,   base+1, base+2);
+      idx.push(base,   base+2, base+3);
+    }
+  }
+
+  if (verts.length === 0) return;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(idx);
+
+  const mat = new THREE.MeshBasicMaterial({
+    color:       0x15120a,   // очень тёмный, почти чёрный
+    side:        THREE.FrontSide,
+    depthWrite:  true,
+    depthTest:   true,
   });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 0;
+  mesh.userData.isCelOutline  = true;
+  mesh.userData.persistent    = false;
+  scene.add(mesh);
+  _sceneObjects.push(mesh);
 }
 // ══════════════════════════════════════════════════════════════════
 
@@ -4259,9 +4254,8 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   // Пересоздаём кувшинки (clearScene их убрала из _persistentObjects тоже)
   if (window._spawnLilypads) window._spawnLilypads();
   buildReflection();
-  // CEL-SHADING: обводка острова через inverted-hull шейдер
-  // Вызываем с небольшой задержкой чтобы matrixWorld успел обновиться
-  setTimeout(() => { try { buildCelOutlines(); } catch(e) { console.warn('outline err:', e); } }, 100);
+  // CEL-SHADING: плоская обводка силуэта острова
+  buildCelOutlines();
   // Загружаем свободно размещённые объекты (декор не на сетке)
   if (freeObjsData && freeObjsData.length > 0) {
     freeObjsData.forEach(fo => {
