@@ -1233,9 +1233,8 @@ function initThree() {
     const CX = (GRID_W-1)/2*TILE_SIZE;
     const CZ = (GRID_H-1)/2*TILE_SIZE;
 
-    // ── Кувшинки: 17-19 штук, два вида: одиночная + большая ─────
-    // ВАЖНО: сначала scene.add(), потом scaleToWorld() — иначе Box3 пустой!
-    const LILY_COUNT = 17 + Math.floor(rand() * 3); // 17, 18 или 19
+    // ── Кувшинки: 45-50 штук, равномерно по всему океану ─────
+    const LILY_COUNT = 45 + Math.floor(rand() * 6);
     for (let i = 0; i < LILY_COUNT; i++) {
       // Два вида: lilywaterbig (большая) ≈ каждая третья
       const isBig = (i % 3 === 2) || rand() < 0.30;
@@ -1246,18 +1245,19 @@ function initThree() {
 
       // Сначала добавляем в сцену — без этого Box3.setFromObject даёт пустой бокс
       scene.add(model);
-      model.updateMatrixWorld(true); // принудительно обновляем матрицу до scaleToWorld
+      model.updateMatrixWorld(true);
 
-      // Теперь масштабируем — Box3 работает корректно
+      // Масштаб
       const worldSz = isBig ? (0.75 + rand() * 0.55) : (1.00 + rand() * 0.95);
       scaleToWorld(model, worldSz);
 
-      // Позиция: хаотично вокруг острова, часть близко, часть дальше
+      // Позиция: равномерно по всему океану — от берега до горизонта
       const angle = rand() * Math.PI * 2;
       const tD = rand();
-      const dist  = ISLAND_R * (1.05 + tD * tD * 2.0); // квадратичное — скопление у берега
-      const px = Math.cos(angle) * dist + (rand()-0.5) * ISLAND_R * 0.25;
-      const pz = Math.sin(angle) * dist + (rand()-0.5) * ISLAND_R * 0.25;
+      // Линейное распределение — кувшинки равномерно от берега до края карты
+      const dist  = ISLAND_R * (1.05 + tD * 3.5);
+      const px = Math.cos(angle) * dist + (rand()-0.5) * ISLAND_R * 0.4;
+      const pz = Math.sin(angle) * dist + (rand()-0.5) * ISLAND_R * 0.4;
 
       model.position.set(CX + px, WATER_Y_LIL, CZ + pz);
       model.rotation.y = rand() * Math.PI * 2;
@@ -1269,8 +1269,8 @@ function initThree() {
       model.userData.lilyPhaseX    = rand() * Math.PI * 2;
       model.userData.lilyPhaseZ    = rand() * Math.PI * 2;
       model.userData.lilySpeed     = 0.8 + rand() * 1.2;    // умеренная скорость качания
-      model.userData.lilyAmpX      = 0.06 + rand() * 0.08;  // амплитуда наклона X
-      model.userData.lilyAmpZ      = 0.05 + rand() * 0.06;  // амплитуда наклона Z
+      model.userData.lilyAmpX      = 0.025 + rand() * 0.025; // амплитуда наклона X — вдвое меньше
+      model.userData.lilyAmpZ      = 0.02  + rand() * 0.02;  // амплитуда наклона Z — вдвое меньше
       model.userData.lilyRotSpeed  = (rand() - 0.5) * 0.018; // медленное вращение Y
       // Течение: каждая кувшинка дрейфует в чуть разных направлениях
       const currentAngle  = 0.35 + rand() * 0.55;
@@ -1475,7 +1475,7 @@ function buildMap(g, customCellData) {
       try {
         const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2);
         const speed = 1.2 + ((r * 7 + c * 13) % 100) / 100 * 1.0;
-        const amp   = 0.03 + ((r * 3 + c * 17) % 100) / 100 * 0.02;
+        const amp   = 0.018 + ((r * 3 + c * 17) % 100) / 100 * 0.012;
         applyWobble(obj, { phase, speed, amp });
       } catch(e) { console.warn('wobble tree error:', e); }
     }
@@ -1535,7 +1535,7 @@ function buildMap(g, customCellData) {
     try {
       const dp = (r*1.41+c*2.73+Math.random()) % (Math.PI*2);
       const ds = 1.0 + Math.random()*1.0;
-      const da = 0.025 + Math.random()*0.02;
+      const da = 0.015 + Math.random()*0.012;
       applyWobble(det, { phase:dp, speed:ds, amp:da });
     } catch(e) { console.warn('wobble deco error:', e); }
   }
@@ -4046,7 +4046,7 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       if (_palmTreeKeys.includes(fo.modelKey)) {
         const _fp = Math.random() * Math.PI * 2;
         const _fs = 1.0 + Math.random() * 1.2;  // было 0.5+0.6
-        const _fa = 0.025 + Math.random() * 0.02; // было 0.05+0.05
+        const _fa = 0.015 + Math.random() * 0.012; // было 0.05+0.05
         applyWobble(obj, { phase: _fp, speed: _fs, amp: _fa });
       }
     });
