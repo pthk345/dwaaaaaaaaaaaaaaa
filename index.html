@@ -1074,7 +1074,7 @@ function initThree() {
   // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
   // density 0.018: ближние тайлы чёткие, горизонт тает
   // Цвет совпадает с небом → плавный переход
-  scene.fog = new THREE.FogExp2(0xe1c9bb, 0.026);
+  scene.fog = new THREE.FogExp2(0xe1c9bb, 0.023);
   window._gameFog = scene.fog;
 
   // ══ НЕБО ══════════════════════════════════
@@ -2115,7 +2115,7 @@ function closeEditor() {
   if(edHoverMesh) { edHoverMesh.visible=false; }
 
   // ── Восстанавливаем небо/океан/туман при выходе из редактора ──
-  scene.fog = window._gameFog || new THREE.FogExp2(0xe1c9bb, 0.026);
+  scene.fog = window._gameFog || new THREE.FogExp2(0xe1c9bb, 0.023);
   if (window._skyTex) {
     scene.background = window._skyTex;
   } else {
@@ -4188,6 +4188,10 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   
   // Build 3D map
   buildMap(grid, customCellData || null);
+  // Восстанавливаем туман и небо (clearScene их не трогает, но редактор мог обнулить)
+  scene.fog = window._gameFog || new THREE.FogExp2(0xe1c9bb, 0.023);
+  if (window._skyTex) scene.background = window._skyTex;
+  if (window._editorFloor) window._editorFloor.visible = false;
   // Пересоздаём кувшинки (clearScene их убрала из _persistentObjects тоже)
   if (window._spawnLilypads) window._spawnLilypads();
   buildReflection();
