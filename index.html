@@ -1232,38 +1232,45 @@ function initThree() {
     const CX = (GRID_W-1)/2*TILE_SIZE;
     const CZ = (GRID_H-1)/2*TILE_SIZE;
 
-    // ── Кувшинки: 22 штуки, размер 0.5–0.9 units ─────────
-    const LILY_KEYS = ['lilywater','lilywater','lilywater','lilywaterbig','lilywaterbig'];
-    for (let i = 0; i < 22; i++) {
+    // ── Кувшинки: 18 штук (17-19), больше больших для красоты ─
+    const LILY_KEYS = ['lilywater','lilywaterbig','lilywaterbig','lilywater','lilywaterbig'];
+    for (let i = 0; i < 18; i++) {
       const key = LILY_KEYS[Math.floor(rand() * LILY_KEYS.length)];
       const model = assets.clone(key);
       if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
-      // Добавляем в сцену ДО scaleToWorld — иначе Box3 пустой
-      scene.add(model);
-      const worldSz = 0.6 + rand() * 0.5;
+      // Размер: кувшинки ~0.5-0.9 units в мире
+      const worldSz = 0.5 + rand() * 0.4;
       scaleToWorld(model, worldSz);
 
-      // Позиция: рядом с островом — видно игроку
-      const angle = rand() * Math.PI * 2;
-      const dist  = ISLAND_R * (1.0 + rand() * 1.0);
-      const px    = Math.cos(angle) * dist;
-      const pz    = Math.sin(angle) * dist;
+      // Позиция за пределами острова
+      let px, pz, attempts = 0;
+      do {
+        const angle = rand() * Math.PI * 2;
+        const dist  = ISLAND_R * (1.1 + rand() * 2.5);
+        px = Math.cos(angle) * dist;
+        pz = Math.sin(angle) * dist;
+        attempts++;
+      } while (Math.abs(px) > OCEAN_R || Math.abs(pz) > OCEAN_R && attempts < 20);
 
       model.position.set(CX + px, WATER_Y_LIL, CZ + pz);
       model.rotation.y = rand() * Math.PI * 2;
 
-      model.userData.lilyT      = rand() * Math.PI * 2;
-      model.userData.lilyPhaseX = rand() * Math.PI * 2;
-      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
-      model.userData.lilySpeed  = 0.35 + rand() * 0.45;
-      model.userData.lilyAmpX   = 0.04 + rand() * 0.05;
-      model.userData.lilyAmpZ   = 0.04 + rand() * 0.05;
-      model.userData.lilyDriftX   = (rand()-0.5)*0.0004;
-      model.userData.lilyDriftZ   = (rand()-0.5)*0.0004;
-      model.userData.lilyRotY     = (rand()-0.5)*0.010;  // вращение вокруг Y
-      model.userData.baseY        = WATER_Y_LIL;
-      model.userData.isLilypad    = true;
+      model.userData.lilyT         = rand() * Math.PI * 2;
+      model.userData.lilyPhaseX    = rand() * Math.PI * 2;
+      model.userData.lilyPhaseZ    = rand() * Math.PI * 2;
+      model.userData.lilySpeed     = 0.3 + rand() * 0.4;   // скорость качания
+      model.userData.lilyAmpX      = 0.05 + rand() * 0.06; // амплитуда наклона X
+      model.userData.lilyAmpZ      = 0.05 + rand() * 0.06; // амплитуда наклона Z
+      model.userData.lilyRotSpeed  = (rand() - 0.5) * 0.008; // медленное вращение Y
+      model.userData.lilyDriftSpd  = 0.04 + rand() * 0.06;   // скорость дрейфа
+      model.userData.lilyDriftAngle= rand() * Math.PI * 2;   // начальное направление
+      model.userData.lilyDriftTurn = (rand() - 0.5) * 0.15;  // поворот траектории/с
+      // Устаревшие поля для совместимости
+      model.userData.lilyDriftX = 0;
+      model.userData.lilyDriftZ = 0;
+      model.userData.baseY      = WATER_Y_LIL;
+      model.userData.isLilypad  = true;
       model.userData.persistent = true;
       model.traverse(m => {
         if (m.isMesh) {
@@ -1273,6 +1280,7 @@ function initThree() {
         }
       });
 
+      scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
@@ -1284,14 +1292,14 @@ function initThree() {
       const model = assets.clone(key);
       if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
-      scene.add(model);
-      const worldSz2 = 0.55 + rand() * 0.5;
-      scaleToWorld(model, worldSz2);
+      // Камыши немного выше (они вертикальные)
+      const worldSz = 0.7 + rand() * 0.5;
+      scaleToWorld(model, worldSz);
 
-      const angle2 = rand() * Math.PI * 2;
-      const dist2  = ISLAND_R * (0.85 + rand() * 0.6);
-      const px2    = Math.cos(angle2) * dist2;
-      const pz2    = Math.sin(angle2) * dist2;
+      const angle = rand() * Math.PI * 2;
+      const dist  = ISLAND_R * (1.05 + rand() * 0.8);
+      const px2   = Math.cos(angle) * dist;
+      const pz2   = Math.sin(angle) * dist;
 
       model.position.set(CX + px2, WATER_Y_LIL, CZ + pz2);
       model.rotation.y = rand() * Math.PI * 2;
@@ -1321,6 +1329,7 @@ function initThree() {
       const rAmp   = 0.08 + Math.random() * 0.06;
       applyWobble(model, { phase: rPhase, speed: rSpeed, amp: rAmp });
 
+      scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
@@ -1392,6 +1401,8 @@ function scaleTo(obj,size) {
 // Rich decoration pool: trees, rocks, crystals, structures
 const DECO_POOL=[
   {k:'detail_tree',w:6},{k:'detail_tree',w:6},{k:'detail_tree_large',w:4},
+  {k:'pirate_palm_straight',w:2},{k:'pirate_palm_bend',w:2},
+  {k:'pirate_palm_detailed_straight',w:1},{k:'pirate_palm_detailed_bend',w:1},
   {k:'detail_rocks',w:3},{k:'detail_rocks_large',w:2},
   {k:'detail_crystal',w:2},{k:'detail_crystal_large',w:1},
   {k:'wood_structure_part',w:2},{k:'detail_dirt',w:3},
@@ -2902,19 +2913,12 @@ function buildReflection() {
       if (!child.isMesh || !child.material) return;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       child.material = mats.map(m => {
-        let nm;
-        if (m.isShaderMaterial) {
-          // ShaderMaterial+BackSide = чёрный → используем Lambert с цветом из uniforms
-          const col = m.uniforms && m.uniforms.uColor ? m.uniforms.uColor.value : new THREE.Color(0x7bc965);
-          const map = m.uniforms && m.uniforms.uMap   ? m.uniforms.uMap.value   : null;
-          nm = new THREE.MeshLambertMaterial({ color: col, map: map });
-        } else {
-          nm = m.clone();
-        }
-        nm.transparent  = false;
-        nm.opacity      = 1.0;
-        nm.depthWrite   = true;
-        nm.side         = THREE.BackSide;
+        const nm = m.clone();
+        nm.transparent = false;
+        nm.opacity = 1.0;
+        nm.depthWrite = true;
+        nm.side = THREE.BackSide;
+        // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
         nm.stencilWrite = true;
         nm.stencilFunc  = THREE.AlwaysStencilFunc;
         nm.stencilZPass = THREE.ReplaceStencilOp;
@@ -2952,43 +2956,77 @@ let rangeRing = null;
 window._wobbleObjects = []; // { obj, phase, speed, amp, baseY }
 window._wobbleTime = 0;
 
-// makeWobbleMaterial: патчим MeshLambertMaterial через onBeforeCompile.
-// Сохраняет ВСЁ родное освещение Three.js — никакой темноты.
+// Создаёт ShaderMaterial с wobble из оригинального MeshLambertMaterial
 function makeWobbleMaterial(origMat, phase, speed, amp) {
-  const mat = origMat.clone ? origMat.clone() : new THREE.MeshLambertMaterial();
-  // Шаримся uniforms в userData чтобы обновлять uTime каждый кадр
-  const wUniforms = {
-    uTime:  { value: 0 },
-    uPhase: { value: phase },
-    uSpeed: { value: speed },
-    uAmp:   { value: amp },
-    uYMin:  { value: 0 },
-    uYMax:  { value: 1 },
+  // Vertex shader: нижние вершины неподвижны, верхние гнутся
+  // uMask = smoothstep(0..1) по нормализованной высоте → только крона двигается
+  const vert = `
+    uniform float uTime;
+    uniform float uPhase;
+    uniform float uSpeed;
+    uniform float uAmp;
+    uniform float uYMin;  // мин Y объекта в local space
+    uniform float uYMax;  // макс Y объекта
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    void main() {
+      vNormal = normalMatrix * normal;
+      vUv = uv;
+      vec3 pos = position;
+      // Маска: 0 у основания → 1 у кроны, с плавным переходом
+      float mask = smoothstep(uYMin + (uYMax - uYMin)*0.25,
+                              uYMin + (uYMax - uYMin)*0.75,
+                              position.y);
+      // Два синуса — создают «живое» некруговое качание
+      float windX = sin(uTime * uSpeed + uPhase) * uAmp * mask;
+      float windZ = sin(uTime * uSpeed * 0.7 + uPhase + 1.3) * uAmp * 0.6 * mask;
+      pos.x += windX;
+      pos.z += windZ;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `;
+  const frag = `
+    uniform vec3 uColor;
+    uniform sampler2D uMap;
+    uniform int uHasMap;
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    void main() {
+      vec3 col = uColor;
+      if (uHasMap == 1) col *= texture2D(uMap, vUv).rgb;
+      // Lambert с правильным освещением:
+      // Имитируем HemisphereLight(sky=0xc8e8ff, ground=0x8fc870, 0.52)
+      // + DirectionalLight(0xfff4d0, 1.55) + AmbientLight(0.13)
+      vec3 nrm = normalize(vNormal);
+      // Солнце
+      vec3 sunDir = normalize(vec3(-0.35, 0.93, 0.52));
+      float sun = max(dot(nrm, sunDir), 0.0);
+      vec3 sunCol = vec3(1.0, 0.96, 0.82) * 1.55;
+      // Hemisphere: небо сверху, земля снизу
+      float hemi = nrm.y * 0.5 + 0.5; // 0=земля, 1=небо
+      vec3 hemiCol = mix(vec3(0.56, 0.78, 0.44), vec3(0.78, 0.91, 1.0), hemi) * 0.52;
+      // Контровой
+      vec3 rimDir = normalize(vec3(0.55, 0.4, -0.47));
+      float rim = max(dot(nrm, rimDir), 0.0);
+      vec3 rimCol = vec3(0.62, 0.81, 1.0) * 0.38;
+      // Итог: ambient(0.13) + hemi + sun + rim
+      vec3 light = vec3(0.13) + hemiCol + sunCol * sun * 0.7 + rimCol * rim * 0.3;
+      gl_FragColor = vec4(col * light, 1.0);
+    }
+  `;
+  const uniforms = {
+    uTime:   { value: 0 },
+    uPhase:  { value: phase },
+    uSpeed:  { value: speed },
+    uAmp:    { value: amp },
+    uYMin:   { value: 0 },
+    uYMax:   { value: 1 },
+    uColor:  { value: origMat.color ? origMat.color.clone() : new THREE.Color(0x7bc965) },
+    uMap:    { value: origMat.map || null },
+    uHasMap: { value: origMat.map ? 1 : 0 },
   };
-  mat.userData._wobbleU = wUniforms;
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, wUniforms);
-    // Объявляем uniforms
-    shader.vertexShader =
-      `uniform float uTime;
-uniform float uPhase;
-uniform float uSpeed;
-uniform float uAmp;
-uniform float uYMin;
-uniform float uYMax;
-`
-      + shader.vertexShader;
-    // Инжектируем displacement после #include <begin_vertex>
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-      float _wMask = smoothstep(uYMin+(uYMax-uYMin)*0.2, uYMin+(uYMax-uYMin)*0.8, position.y);
-      transformed.x += sin(uTime*uSpeed + uPhase) * uAmp * _wMask;
-      transformed.z += sin(uTime*uSpeed*0.7 + uPhase+1.3) * uAmp*0.6 * _wMask;`
-    );
-    mat.userData._compiledShader = shader;
-  };
-  mat.needsUpdate = true;
+  const mat = new THREE.ShaderMaterial({ vertexShader:vert, fragmentShader:frag, uniforms });
+  mat.side = origMat.side || THREE.FrontSide;
   return mat;
 }
 
@@ -3028,13 +3066,7 @@ function updateWobble(dt) {
   const t = window._wobbleTime;
   for (const item of window._wobbleObjects) {
     item.obj.traverse(m => {
-      if (!m.isMesh || !m.material) return;
-      const wu = m.material.userData && m.material.userData._wobbleU;
-      if (wu) {
-        wu.uTime.value = t;
-        if (m.material.userData._compiledShader)
-          m.material.userData._compiledShader.uniforms.uTime.value = t;
-      }
+      if (m._wobbleMat) m._wobbleMat.uniforms.uTime.value = t;
     });
   }
 }
@@ -3075,20 +3107,27 @@ function gameLoop(ts) {
       if (!m.userData.isLilypad) continue;
       m.userData.lilyT += realDt * m.userData.lilySpeed;
       const t = m.userData.lilyT;
-      // Качание: плавный синус по X и Z
-      // Два синуса — «живое» покачивание
+
+      // Покачивание по X и Z — два синуса с разными частотами для «живости»
       m.rotation.x = Math.sin(t + m.userData.lilyPhaseX) * m.userData.lilyAmpX
-                   + Math.sin(t*1.9 + m.userData.lilyPhaseX*0.5) * m.userData.lilyAmpX*0.3;
-      m.rotation.z = Math.cos(t*0.7 + m.userData.lilyPhaseZ) * m.userData.lilyAmpZ
-                   + Math.cos(t*1.4 + m.userData.lilyPhaseZ*0.7) * m.userData.lilyAmpZ*0.3;
-      // Волна по Y
+                   + Math.sin(t * 1.7 + m.userData.lilyPhaseX * 0.5) * m.userData.lilyAmpX * 0.4;
+      m.rotation.z = Math.cos(t * 0.73 + m.userData.lilyPhaseZ) * m.userData.lilyAmpZ
+                   + Math.cos(t * 1.3 + m.userData.lilyPhaseZ * 0.7) * m.userData.lilyAmpZ * 0.3;
+
+      // Волновое покачивание по Y — как на воде
       m.position.y = m.userData.baseY
-                   + Math.sin(t*0.8 + m.userData.lilyPhaseX)*0.022
-                   + Math.sin(t*1.6 + m.userData.lilyPhaseZ)*0.009;
-      // Медленное вращение вокруг Y + дрейф
-      if (m.userData.lilyRotY) m.rotation.y += realDt * m.userData.lilyRotY;
-      m.position.x += m.userData.lilyDriftX;
-      m.position.z += m.userData.lilyDriftZ;
+                   + Math.sin(t * 0.9 + m.userData.lilyPhaseX) * 0.018
+                   + Math.sin(t * 1.6 + m.userData.lilyPhaseZ * 1.2) * 0.008;
+
+      // Лёгкое вращение вокруг Y — кувшинки медленно крутятся на воде
+      m.rotation.y += realDt * m.userData.lilyRotSpeed;
+
+      // Дрейф по синусоидальной траектории — волнообразно, не прямолинейно
+      m.userData.lilyDriftAngle = (m.userData.lilyDriftAngle || 0)
+                                + realDt * m.userData.lilyDriftTurn;
+      const driftAngle = m.userData.lilyDriftAngle;
+      m.position.x += Math.cos(driftAngle) * m.userData.lilyDriftSpd * realDt;
+      m.position.z += Math.sin(driftAngle) * m.userData.lilyDriftSpd * realDt;
     }
   }
 
@@ -3983,31 +4022,16 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       obj.userData = { freeObj: true, modelKey: fo.modelKey };
       scene.add(obj);
       tileObjects.push(obj); // чтобы попало в отражение
-      // Wobble для деревьев и пальм
-      const _swayKeys = ['pirate_palm_straight','pirate_palm_bend',
+      // Wobble для пальм и деревьев в freeObjs
+      const _palmTreeKeys = ['pirate_palm_straight','pirate_palm_bend',
         'pirate_palm_detailed_straight','pirate_palm_detailed_bend',
         'tile_tree','tile_tree_double','tile_tree_quad',
-        'snow_tile_tree','snow_tile_tree_double','detail_tree','detail_tree_large'];
-      if (_swayKeys.includes(fo.modelKey)) {
-        const _box2 = new THREE.Box3().setFromObject(obj);
-        const _lbox = _box2.clone().applyMatrix4(new THREE.Matrix4().copy(obj.matrixWorld).invert());
-        applyWobble(obj, {
-          phase: Math.random()*Math.PI*2,
-          speed: 0.5+Math.random()*0.6,
-          amp:   0.05+Math.random()*0.04
-        });
-        obj.traverse(m => {
-          if (!m.isMesh || !m.material) return;
-          const wu = m.material.userData && m.material.userData._wobbleU;
-          if (wu) {
-            wu.uYMin.value = _lbox.min.y;
-            wu.uYMax.value = _lbox.max.y;
-            if (m.material.userData._compiledShader) {
-              m.material.userData._compiledShader.uniforms.uYMin.value = _lbox.min.y;
-              m.material.userData._compiledShader.uniforms.uYMax.value = _lbox.max.y;
-            }
-          }
-        });
+        'snow_tile_tree','snow_tile_tree_double'];
+      if (_palmTreeKeys.includes(fo.modelKey)) {
+        const _fp = Math.random() * Math.PI * 2;
+        const _fs = 0.5 + Math.random() * 0.6;
+        const _fa = 0.05 + Math.random() * 0.05;
+        applyWobble(obj, { phase: _fp, speed: _fs, amp: _fa });
       }
     });
     buildReflection(); // перестроим отражение с учётом freeObjs
