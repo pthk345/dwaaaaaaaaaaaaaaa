@@ -1289,8 +1289,8 @@ function initThree() {
     uCellSpeed:     { value: 0.18 },
     uFlowX:         { value: 0.012 },
     uFlowZ:         { value: -0.05 },
-    uEdgeThreshold: { value: 0.12 },   // толще края
-    uEdgeSoftness:  { value: 0.06 },   // мягче — белая полоса шире
+    uEdgeThreshold: { value: 0.30 },   // очень толстые края
+    uEdgeSoftness:  { value: 0.12 },   // широкая мягкая белая полоса
     uDeepColor:     { value: new THREE.Color(0xb8cad9) },   // #b8cad9 — ненасыщенный
     uMidColor:      { value: new THREE.Color(0xc8d8e6) },   // чуть светлее
     uHighlight:     { value: new THREE.Color(0xffffff) },   // белый для краёв
@@ -1421,7 +1421,7 @@ function initThree() {
         const shadowDisc = new THREE.Mesh(shadowGeo, shadowMat);
         shadowDisc.rotation.x = -Math.PI / 2;
         // Чуть ниже кувшинки чтобы не z-fight
-        shadowDisc.position.set(CX + px, WATER_Y_LIL + 0.02, CZ + pz);
+        shadowDisc.position.set(CX + px, WATER_Y_LIL - 0.01, CZ + pz);
         shadowDisc.renderOrder = 6;
         shadowDisc.userData.isLilyShadow = true;
         shadowDisc.userData.persistent   = true;
@@ -3267,11 +3267,11 @@ function gameLoop(ts) {
           }
         }
       }
-      // Синхронизируем тень с позицией кувшинки
+      // Синхронизируем тень с позицией кувшинки — точно под ней
       if (m.userData.shadowDisc) {
         m.userData.shadowDisc.position.x = m.position.x;
+        m.userData.shadowDisc.position.y = m.position.y - 0.01; // вплотную под кувшинкой
         m.userData.shadowDisc.position.z = m.position.z;
-        // Тень чуть темнее когда кувшинка на гребне волны
         const heightFactor = Math.max(0.15, 0.30 - (m.position.y - m.userData.baseY) * 3.0);
         m.userData.shadowDisc.material.opacity = heightFactor;
       }
