@@ -1268,10 +1268,10 @@ function initThree() {
       model.userData.lilyT         = rand() * Math.PI * 2;
       model.userData.lilyPhaseX    = rand() * Math.PI * 2;
       model.userData.lilyPhaseZ    = rand() * Math.PI * 2;
-      model.userData.lilySpeed     = 1.4 + rand() * 2.0;    // было 0.28+0.40 — ускорили в 5x
-      model.userData.lilyAmpX      = 0.08 + rand() * 0.10;  // было 0.025+0.035 — амплитуда в 3x
-      model.userData.lilyAmpZ      = 0.06 + rand() * 0.08;  // было 0.020+0.030 — амплитуда в 3x
-      model.userData.lilyRotSpeed  = (rand() - 0.5) * 0.025; // было 0.008 — вращение в 3x
+      model.userData.lilySpeed     = 0.8 + rand() * 1.2;    // умеренная скорость качания
+      model.userData.lilyAmpX      = 0.06 + rand() * 0.08;  // амплитуда наклона X
+      model.userData.lilyAmpZ      = 0.05 + rand() * 0.06;  // амплитуда наклона Z
+      model.userData.lilyRotSpeed  = (rand() - 0.5) * 0.018; // медленное вращение Y
       // Течение: каждая кувшинка дрейфует в чуть разных направлениях
       const currentAngle  = 0.35 + rand() * 0.55;
       const currentSpeed  = 0.00010 + rand() * 0.00016;
@@ -1296,56 +1296,9 @@ function initThree() {
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
 
-    // ── Камыши: 14 штук у берегов, размер 0.6–1.0 units ──
-    const REED_KEYS = ['kamish','kamishi','kamish','kamishi'];
-    for (let i = 0; i < 14; i++) {
-      const key = REED_KEYS[Math.floor(rand() * REED_KEYS.length)];
-      const model = assets.clone(key);
-      if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); continue; }
+    // ── Камыши убраны ──
 
-      // Камыши немного выше (они вертикальные)
-      // Сначала в сцену, потом scale — иначе Box3 пустой
-      scene.add(model);
-      model.updateMatrixWorld(true);
-      const worldSz = 0.7 + rand() * 0.5;
-      scaleToWorld(model, worldSz);
-
-      const angle = rand() * Math.PI * 2;
-      const dist  = ISLAND_R * (1.05 + rand() * 0.8);
-      const px2   = Math.cos(angle) * dist;
-      const pz2   = Math.sin(angle) * dist;
-
-      model.position.set(CX + px2, WATER_Y_LIL, CZ + pz2);
-      model.rotation.y = rand() * Math.PI * 2;
-
-      model.userData.lilyT      = rand() * Math.PI * 2;
-      model.userData.lilySpeed  = 0.25 + rand() * 0.3;
-      model.userData.lilyAmpX   = 0.02 + rand() * 0.025;
-      model.userData.lilyAmpZ   = 0.02 + rand() * 0.025;
-      model.userData.lilyPhaseX = rand() * Math.PI * 2;
-      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
-      model.userData.lilyDriftX = 0;
-      model.userData.lilyDriftZ = 0;
-      model.userData.baseY      = WATER_Y_LIL;
-      model.userData.isLilypad  = true;
-      model.userData.persistent = true;
-      model.traverse(m => {
-        if (m.isMesh) {
-          m.castShadow    = false;
-          m.receiveShadow = false;
-          m.renderOrder   = 7;
-        }
-      });
-
-      // Wobble для камышей — они гнутся сильнее чем деревья
-      const rPhase = Math.random() * Math.PI * 2;
-      const rSpeed = 1.2 + Math.random() * 1.2;  // было 0.5+0.6
-      const rAmp   = 0.14 + Math.random() * 0.10; // было 0.08+0.06
-      applyWobble(model, { phase: rPhase, speed: rSpeed, amp: rAmp });
-      window._lilypadMeshes.push(model);
-      if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
-    }
-  };
+  }; // конец _spawnLilypads
   // Спавним с задержкой после загрузки всех ассетов
   setTimeout(() => window._spawnLilypads && window._spawnLilypads(), 3000);
   // ─────────────────────────────────────────────────────────────
@@ -1516,6 +1469,7 @@ function buildMap(g, customCellData) {
     obj.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
+    obj.updateMatrixWorld(true); // нужно для корректного Box3 в applyWobble
 
     // Wobble для деревьев: уникальная фаза на каждую клетку
     if (tt === TILE_TREE) {
@@ -1574,6 +1528,7 @@ function buildMap(g, customCellData) {
     det.position.set(c*TILE_SIZE+ox,0,r*TILE_SIZE+oz);
     det.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     addToScene(det); tileObjects.push(det);
+    det.updateMatrixWorld(true); // нужно для корректного Box3 в applyWobble
     // Wobble для detail деревьев
     {
       const dp = (r*1.41+c*2.73+Math.random()) % (Math.PI*2);
