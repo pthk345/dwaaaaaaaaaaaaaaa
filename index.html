@@ -604,81 +604,85 @@ function loadTextureOnce(url) {
 
 // ═══════════════════════════════════════════════════════════════════
 // VEGETATION WOBBLE — vertex-shader wind sway for trees, details etc.
-// Key trick: height mask pins base to ground, crown sways freely.
-// Phase seeded from world-space XZ → no two trees sync.
-// One global uTime uniform updated in gameLoop.
+
+// ═══════════════════════════════════════════════════════════════════
+// VEGETATION BEND — smooth organic sway via vertex shader
+//
+// Principle: displacement = sin(time + phase) * amplitude * (y / maxY)^2
+//   • y = 0 (base/grass)   → zero movement, stays planted
+//   • y = maxY (crown)     → full bend amplitude
+//   • Exponent ^1.5: smooth curve, more natural than linear
+//
+// Phase is derived from world XZ hash → every tree has unique timing.
+// Two detuned sines (primary + secondary) → irregular, non-repeating swing.
+// No rotation, no twisting — pure lateral displacement on X and Z.
 // ═══════════════════════════════════════════════════════════════════
 const _WOBBLE_TIME = { value: 0.0 };
-const _wobbleMats  = []; // all patched materials for disposal tracking
 
 function _applyWobble(mat) {
   if (!mat || mat._wobble) return;
   mat._wobble = true;
-  _wobbleMats.push(mat);
 
   mat.onBeforeCompile = function(shader) {
-    shader.uniforms.uWobbleTime = _WOBBLE_TIME;
-
-    // Inject uWobbleTime declaration into vertex shader
-    shader.vertexShader = 'uniform float uWobbleTime;\n' + shader.vertexShader;
-
-    // Lean sway: position.y is the lever arm for rotation around base.
-    // lean angle * position.y = vertex displacement (small-angle approximation).
-    // Grass at y≈0 → zero movement. Crown at y≈1.5 → max lean.
-    // Two detuned frequencies for organic feel. NO X+Z combo = no twisting.
+    shader.uniforms.uWT = _WOBBLE_TIME;
+    shader.vertexShader = 'uniform float uWT;\n' + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
-      `#include <begin_vertex>
-{
-  // World XZ → unique random phase per tree, no two trees sync
-  vec4 _wpos = modelMatrix * vec4(position, 1.0);
-  float _ph = fract(sin(dot(_wpos.xz, vec2(127.1, 311.7))) * 43758.5453);
-
-  // Primary sway: lean along X axis (main wind direction)
-  float _leanX = sin(uWobbleTime * 1.2 + _ph * 6.2832) * 0.055;
-  // Secondary: perpendicular lean, slower, smaller → slight diagonal bob
-  float _leanZ = sin(uWobbleTime * 0.71 + _ph * 3.927) * 0.028;
-
-  // Displacement = lean_angle * height (pendulum geometry)
-  // position.y naturally = 0 at grass base → no base movement
-  transformed.x += position.y * _leanX;
-  transformed.z += position.y * _leanZ;
-}
-`
+      [
+        '#include <begin_vertex>',
+        '{',
+        // Unique phase per tree from world position hash
+        '  vec4 _wp = modelMatrix * vec4(position, 1.0);',
+        '  float _ph = fract(sin(dot(_wp.xz, vec2(127.1,311.7))) * 43758.5453);',
+        // Normalized height: clamp 0..1, then apply power curve
+        // so base = 0, crown = 1, mid = ~0.35 (soft start)
+        '  float _yn = clamp(position.y * 0.55, 0.0, 1.0);',
+        '  float _mask = _yn * _yn * _yn;',   // cubic: base locked, gradual rise
+        // Primary bend: slow, medium amplitude
+        '  float _b1 = sin(uWT * 0.9 + _ph * 6.2832) * 0.07;',
+        // Secondary bend: slightly faster, perpendicular, smaller
+        '  float _b2 = sin(uWT * 0.61 + _ph * 4.712) * 0.04;',
+        // Apply: pure lateral displacement proportional to height
+        '  transformed.x += _b1 * _mask;',
+        '  transformed.z += _b2 * _mask;',
+        '}'
+      ].join('\n')
     );
   };
   mat.needsUpdate = true;
 }
 
-// Apply wobble to every mesh inside a vegetation object,
-// cloning materials first so grass tiles sharing the same mat are unaffected.
-
-// Keys that should get wind wobble animation
+// Vegetation keys that should sway (explicit — no sand/rocks/dirt/wood)
 function _isVegetation(key) {
-  return key && (
+  if (!key) return false;
+  // Whitelist: only actual plants
+  return (
     key.includes('tree')   ||
-    key.includes('crystal')||
+    key.includes('palm')   ||
     key.includes('reed')   ||
     key.includes('bush')   ||
     key.includes('bamboo') ||
-    key.includes('flower') ||
-    key.includes('palm')   ||
-    key.includes('detail_') // all detail decorations: trees, crystals, rocks
+    key.includes('flower')
+    // crystals: skipped (they're minerals, not plants)
+    // detail_dirt, detail_rocks, detail_dirt_large: skipped (sand/gravel)
+    // detail_tree / detail_tree_large: caught via 'tree'
   );
 }
 
 function _addWobble(obj) {
   obj.traverse(function(child) {
     if (!child.isMesh) return;
-    const mats = Array.isArray(child.material) ? child.material : [child.material];
-    child.material = mats.map(function(m) {
-      if (!m || m._wobble) return m;
-      const mc = m.clone();
-      _applyWobble(mc);
-      return mc;
-    });
-    if (!Array.isArray(child.material)) child.material = child.material; // keep single
-    else if (child.material.length === 1) child.material = child.material[0];
+    if (Array.isArray(child.material)) {
+      child.material = child.material.map(function(m) {
+        if (!m || m._wobble) return m;
+        const mc = m.clone(); _applyWobble(mc); return mc;
+      });
+      if (child.material.length === 1) child.material = child.material[0];
+    } else {
+      if (child.material && !child.material._wobble) {
+        const mc = child.material.clone(); _applyWobble(mc); child.material = mc;
+      }
+    }
   });
 }
 // ═══════════════════════════════════════════════════════════════════
@@ -3013,7 +3017,7 @@ function gameLoop(ts) {
   lastTime = ts;
 
   // Обновляем время для wobble-анимации растительности
-  _WOBBLE_TIME.value = ts * 0.001;
+  _WOBBLE_TIME.value = ts * 0.001; // vegetation bend time
 
   // Анимация воды — медленный дрейф UV
   if (window._waterMesh && window._waterMesh.material.map) {
