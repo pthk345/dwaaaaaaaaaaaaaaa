@@ -1207,114 +1207,124 @@ function initThree() {
   });
 
   // ── Кувшинки на воде: спавним после загрузки ассетов ─────
-  // Откладываем чтобы ассеты успели загрузиться
   window._lilypadMeshes = [];
   window._spawnLilypads = function() {
     if (!assets) return;
-    // Убираем старые
     window._lilypadMeshes.forEach(m => { if(m.parent) m.parent.remove(m); });
     window._lilypadMeshes = [];
 
-    const WATER_Y_LIL = _MIRROR_Y + 0.04; // чуть выше воды, видны хорошо
-    const keys = ['lilywater','lilywater','lilywater','lilywaterbig','lilywaterbig'];
-    const COUNT = 18; // не много не мало
+    const WATER_Y_LIL = _MIRROR_Y + 0.05;
 
-    // Псевдорандом для воспроизводимого расположения
-    let seed = 42;
+    // Псевдорандом (воспроизводимый)
+    let seed = 137;
     const rand = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff; };
 
-    for (let i = 0; i < COUNT; i++) {
-      const key = keys[Math.floor(rand() * keys.length)];
+    // Хелпер: масштабируем модель до нужного worldSize
+    const scaleToWorld = (obj, worldSize) => {
+      const b = new THREE.Box3().setFromObject(obj);
+      const s = new THREE.Vector3(); b.getSize(s);
+      const m = Math.max(s.x, s.y, s.z);
+      if (m > 0.001) { const f = worldSize / m; obj.scale.set(f, f, f); }
+    };
+
+    const ISLAND_R = (GRID_W * TILE_SIZE) * 0.55;
+    const OCEAN_R  = ISLAND_R * 3.2;
+    const CX = (GRID_W-1)/2*TILE_SIZE;
+    const CZ = (GRID_H-1)/2*TILE_SIZE;
+
+    // ── Кувшинки: 22 штуки, размер 0.5–0.9 units ─────────
+    const LILY_KEYS = ['lilywater','lilywater','lilywater','lilywaterbig','lilywaterbig'];
+    for (let i = 0; i < 22; i++) {
+      const key = LILY_KEYS[Math.floor(rand() * LILY_KEYS.length)];
       const model = assets.clone(key);
-      if (!model) continue;
+      if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
-      // Масштаб: разнообразный, ~0.25–0.45
-      const sc = 0.25 + rand() * 0.20;
-      model.scale.set(sc, sc, sc);
+      // Размер: кувшинки ~0.5-0.9 units в мире
+      const worldSz = 0.5 + rand() * 0.4;
+      scaleToWorld(model, worldSz);
 
-      // Позиция: по всей плоскости воды (ocean plane)
-      // Размещаем вокруг острова — за его пределами
-      const ISLAND_R = (GRID_W * TILE_SIZE) * 0.6; // радиус острова
-      const OCEAN_R  = ISLAND_R * 2.8;
-      let px, pz;
-      // Выбираем позицию вне острова
+      // Позиция за пределами острова
+      let px, pz, attempts = 0;
       do {
-        px = (rand() - 0.5) * OCEAN_R * 2;
-        pz = (rand() - 0.5) * OCEAN_R * 2;
-      } while (Math.sqrt(px*px + pz*pz) < ISLAND_R * 0.7);
+        const angle = rand() * Math.PI * 2;
+        const dist  = ISLAND_R * (1.1 + rand() * 2.5);
+        px = Math.cos(angle) * dist;
+        pz = Math.sin(angle) * dist;
+        attempts++;
+      } while (Math.abs(px) > OCEAN_R || Math.abs(pz) > OCEAN_R && attempts < 20);
 
-      model.position.set(
-        (GRID_W-1)/2*TILE_SIZE + px,
-        WATER_Y_LIL,
-        (GRID_H-1)/2*TILE_SIZE + pz
-      );
-
-      // Случайный угол поворота
+      model.position.set(CX + px, WATER_Y_LIL, CZ + pz);
       model.rotation.y = rand() * Math.PI * 2;
 
-      // Уникальная фаза качания для каждой кувшинки
-      model.userData.lilyT     = rand() * Math.PI * 2;
+      model.userData.lilyT      = rand() * Math.PI * 2;
       model.userData.lilyPhaseX = rand() * Math.PI * 2;
       model.userData.lilyPhaseZ = rand() * Math.PI * 2;
-      model.userData.lilySpeed  = 0.4 + rand() * 0.5;  // разная скорость
-      model.userData.lilyAmpX   = 0.03 + rand() * 0.04; // амплитуда наклона
-      model.userData.lilyAmpZ   = 0.03 + rand() * 0.04;
-      model.userData.lilyDriftX = (rand() - 0.5) * 0.0008; // медленный дрейф
-      model.userData.lilyDriftZ = (rand() - 0.5) * 0.0008;
+      model.userData.lilySpeed  = 0.35 + rand() * 0.45;
+      model.userData.lilyAmpX   = 0.04 + rand() * 0.05;
+      model.userData.lilyAmpZ   = 0.04 + rand() * 0.05;
+      model.userData.lilyDriftX = (rand() - 0.5) * 0.0006;
+      model.userData.lilyDriftZ = (rand() - 0.5) * 0.0006;
       model.userData.baseY      = WATER_Y_LIL;
       model.userData.isLilypad  = true;
       model.userData.persistent = true;
-      model.traverse(m=>{ if(m.isMesh){ m.castShadow=false; m.receiveShadow=false; } });
+      model.traverse(m => {
+        if (m.isMesh) {
+          m.castShadow    = false;
+          m.receiveShadow = false;
+          m.renderOrder   = 7;
+        }
+      });
 
       scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
 
-    // Камыши: по берегам
-    const REED_KEYS  = ['kamish','kamishi','kamish','kamishi'];
-    const REED_COUNT = 12;
-    for (let i = 0; i < REED_COUNT; i++) {
-      const key  = REED_KEYS[Math.floor(rand() * REED_KEYS.length)];
+    // ── Камыши: 14 штук у берегов, размер 0.6–1.0 units ──
+    const REED_KEYS = ['kamish','kamishi','kamish','kamishi'];
+    for (let i = 0; i < 14; i++) {
+      const key = REED_KEYS[Math.floor(rand() * REED_KEYS.length)];
       const model = assets.clone(key);
-      if (!model) continue;
+      if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
-      const sc = 0.35 + rand() * 0.25;
-      model.scale.set(sc, sc, sc);
+      // Камыши немного выше (они вертикальные)
+      const worldSz = 0.7 + rand() * 0.5;
+      scaleToWorld(model, worldSz);
 
-      // Камыши чуть ближе к берегу
       const angle = rand() * Math.PI * 2;
-      const dist  = ISLAND_R * (0.85 + rand() * 0.5);
+      const dist  = ISLAND_R * (1.05 + rand() * 0.8);
       const px2   = Math.cos(angle) * dist;
       const pz2   = Math.sin(angle) * dist;
 
-      model.position.set(
-        (GRID_W-1)/2*TILE_SIZE + px2,
-        WATER_Y_LIL - 0.01,
-        (GRID_H-1)/2*TILE_SIZE + pz2
-      );
+      model.position.set(CX + px2, WATER_Y_LIL, CZ + pz2);
       model.rotation.y = rand() * Math.PI * 2;
 
       model.userData.lilyT      = rand() * Math.PI * 2;
-      model.userData.lilySpeed  = 0.3 + rand() * 0.3;
-      model.userData.lilyAmpX   = 0.015 + rand() * 0.02; // камыши качаются меньше
-      model.userData.lilyAmpZ   = 0.015 + rand() * 0.02;
+      model.userData.lilySpeed  = 0.25 + rand() * 0.3;
+      model.userData.lilyAmpX   = 0.02 + rand() * 0.025;
+      model.userData.lilyAmpZ   = 0.02 + rand() * 0.025;
       model.userData.lilyPhaseX = rand() * Math.PI * 2;
       model.userData.lilyPhaseZ = rand() * Math.PI * 2;
       model.userData.lilyDriftX = 0;
       model.userData.lilyDriftZ = 0;
-      model.userData.baseY      = WATER_Y_LIL - 0.01;
+      model.userData.baseY      = WATER_Y_LIL;
       model.userData.isLilypad  = true;
       model.userData.persistent = true;
-      model.traverse(m=>{ if(m.isMesh){ m.castShadow=false; m.receiveShadow=false; } });
+      model.traverse(m => {
+        if (m.isMesh) {
+          m.castShadow    = false;
+          m.receiveShadow = false;
+          m.renderOrder   = 7;
+        }
+      });
 
       scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
   };
-  // Спавним после небольшой задержки (ждём загрузки ассетов)
-  setTimeout(() => window._spawnLilypads && window._spawnLilypads(), 2500);
+  // Спавним с задержкой после загрузки всех ассетов
+  setTimeout(() => window._spawnLilypads && window._spawnLilypads(), 3000);
   // ─────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────
 
