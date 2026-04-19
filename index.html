@@ -1160,7 +1160,7 @@ function initThree() {
 
   // ══════════════════════════════════════════════════════════════
 
-  // ── OCEAN: Voronoi anime cel-shaded water (from water-anime-shader) ──
+  // ── OCEAN: Voronoi anime cel-shaded water ──
   const WATER_Y = _MIRROR_Y - 0.002;
 
   const _waterVert = `
@@ -1199,51 +1199,83 @@ function initThree() {
       return min(a, b) - h * h * h * k / 6.0;
     }
 
+    // Value noise
+    float vnoise(vec2 p) {
+      vec2 i = floor(p); vec2 f = fract(p);
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      float a = fract(sin(dot(i,             vec2(127.1,311.7))) * 43758.5453);
+      float b = fract(sin(dot(i + vec2(1,0), vec2(127.1,311.7))) * 43758.5453);
+      float c = fract(sin(dot(i + vec2(0,1), vec2(127.1,311.7))) * 43758.5453);
+      float d = fract(sin(dot(i + vec2(1,1), vec2(127.1,311.7))) * 43758.5453);
+      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
+
+    // FBM — 3 октавы искажения UV
+    vec2 fbm2(vec2 p) {
+      vec2 r = vec2(0.0);
+      float amp = 0.5; float freq = 1.0;
+      for (int i = 0; i < 3; i++) {
+        r.x += (vnoise(p * freq + vec2(0.0, 1.7)) * 2.0 - 1.0) * amp;
+        r.y += (vnoise(p * freq + vec2(3.4, 8.1)) * 2.0 - 1.0) * amp;
+        freq *= 2.1; amp *= 0.48;
+      }
+      return r;
+    }
+
     vec2 cellPt(vec2 seed) {
       return 0.5 + 0.5 * sin(uTime * uCellSpeed + 6.2831 * seed);
     }
 
     float voronoiF1(vec2 p) {
-      vec2 i = floor(p), f = fract(p);
-      float md = 8.0;
+      vec2 i = floor(p), f = fract(p); float md = 8.0;
       for (int y = -1; y <= 1; y++)
         for (int x = -1; x <= 1; x++) {
-          vec2 n  = vec2(float(x), float(y));
-          vec2 pt = cellPt(hash2(i + n));
-          md = min(md, length(n + pt - f));
+          vec2 n = vec2(float(x), float(y));
+          md = min(md, length(n + cellPt(hash2(i + n)) - f));
         }
       return md;
     }
 
     float voronoiSF1(vec2 p) {
-      vec2 i = floor(p), f = fract(p);
-      float res = 8.0;
+      vec2 i = floor(p), f = fract(p); float res = 8.0;
       for (int y = -1; y <= 1; y++)
         for (int x = -1; x <= 1; x++) {
-          vec2 n  = vec2(float(x), float(y));
-          vec2 pt = cellPt(hash2(i + n));
-          res = smin(res, length(n + pt - f), 0.4);
+          vec2 n = vec2(float(x), float(y));
+          res = smin(res, length(n + cellPt(hash2(i + n)) - f), 0.4);
         }
       return res;
     }
 
     void main() {
-      vec2  uv   = vWorldPos * uScale + vec2(uFlowX, uFlowZ) * uTime;
+      // FBM деформация UV — органичное живое движение
+      vec2 baseUV = vWorldPos * uScale + vec2(uFlowX, uFlowZ) * uTime;
+      vec2 warp   = fbm2(baseUV * 0.65 + uTime * 0.035) * 0.5;
+      vec2 uv     = baseUV + warp;
+
       float f1   = voronoiF1(uv);
+      float sf1  = voronoiSF1(uv);
+      float edge = f1 - sf1;
 
-      // Круглые пузырьки пены: f1 — расстояние до ближайшей точки Вороного.
-      // Маленькое f1 = центр пузырька = белая пена.
-      float bubble = 1.0 - smoothstep(
-        uEdgeThreshold - uEdgeSoftness,
-        uEdgeThreshold + uEdgeSoftness,
-        f1
-      );
+      // Цветовой рамп Вороного
+      float t1 = smoothstep(uEdgeThreshold - uEdgeSoftness,
+                             uEdgeThreshold + uEdgeSoftness, edge);
+      float t2 = smoothstep(uEdgeThreshold + uEdgeSoftness,
+                             uEdgeThreshold + uEdgeSoftness * 3.5, edge);
+      vec3 color = mix(uDeepColor, uMidColor, t1);
+      color      = mix(color, uHighlight, t2 * 0.65);
 
-      // Вода + белые кружки поверх
-      vec3 color = mix(uDeepColor, uMidColor, bubble * 0.25);
-      color      = mix(color, uHighlight, bubble);
+      // Простой Fresnel: осветляет воду там где смотрим под углом
+      // Используем расстояние от камеры в world XZ как прокси для угла
+      float camDist = length(vWorldPos - uCamXZ);
+      float fresnel = clamp(camDist / 28.0, 0.0, 1.0);
+      fresnel = pow(fresnel, 2.5);
+      color += uHighlight * fresnel * 0.15;
 
-      // Distance fade к горизонту
+      // Specular блик — статичный солнечный highlight по FBM
+      float spec = pow(clamp(vnoise(uv * 2.3 + uTime * 0.05) - 0.55, 0.0, 1.0) / 0.45, 3.0) * 0.35;
+      color += vec3(1.0) * spec;
+
+      // Distance fade
       float dist = length(vWorldPos - uCamXZ);
       float fade = 1.0 - pow(clamp(dist / uFadeDistance, 0.0, 1.0), uFadeStrength);
 
@@ -1253,15 +1285,15 @@ function initThree() {
 
   const waterUniforms = {
     uTime:          { value: 0 },
-    uScale:         { value: 0.18 },       // чуть крупнее → пузырьки меньше
-    uCellSpeed:     { value: 0.38 },       // скорость анимации ячеек
-    uFlowX:         { value: 0.022 },      // горизонтальный дрейф
-    uFlowZ:         { value: -0.09 },      // вертикальный дрейф
-    uEdgeThreshold: { value: 0.30 },       // радиус круглого пузырька
-    uEdgeSoftness:  { value: 0.06 },       // мягкость края кружка
-    uDeepColor:     { value: new THREE.Color(0x7dd9f5) }, // светлый голубой
-    uMidColor:      { value: new THREE.Color(0x9de6f8) }, // ещё светлее
-    uHighlight:     { value: new THREE.Color(0xffffff) }, // пена — чисто белая
+    uScale:         { value: 0.14 },
+    uCellSpeed:     { value: 0.18 },
+    uFlowX:         { value: 0.012 },
+    uFlowZ:         { value: -0.05 },
+    uEdgeThreshold: { value: 0.07 },
+    uEdgeSoftness:  { value: 0.04 },
+    uDeepColor:     { value: new THREE.Color(0x55c8ee) },
+    uMidColor:      { value: new THREE.Color(0x80dcf5) },
+    uHighlight:     { value: new THREE.Color(0xd6f4ff) },
     uFadeDistance:  { value: 220.0 },
     uFadeStrength:  { value: 2.0 },
     uCamXZ:         { value: new THREE.Vector2() },
@@ -1287,7 +1319,7 @@ function initThree() {
   window._waterT = 0;
   if (!_persistentObjects.includes(waterMesh)) _persistentObjects.push(waterMesh);
 
-  // Пена убрана — шейдер сам создаёт блики на гребнях
+  // Пена убрана — шейдер создаёт блики на гребнях сам
   window._foamMesh = null;
 
   // ── Кувшинки на воде: спавним после загрузки ассетов ─────
