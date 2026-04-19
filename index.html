@@ -706,6 +706,7 @@ class GLBLoader {
           }
         }
         if (mat.doubleSided) m.side = THREE.DoubleSide;
+        if (typeof patchEdge === 'function') patchEdge(m);
         materials.push(m);
       }
     }
@@ -736,7 +737,7 @@ class GLBLoader {
         if (!geo.attributes.normal) geo.computeVertexNormals();
         const mat = (prim.material !== undefined && materials[prim.material]) 
           ? materials[prim.material] 
-          : new THREE.MeshLambertMaterial({ color: 0x88aa88 });
+          : (() => { const _m = new THREE.MeshLambertMaterial({ color: 0x88aa88 }); if (typeof patchEdge === 'function') patchEdge(_m); return _m; })();
         group.add(new THREE.Mesh(geo, mat));
       }
       return group;
@@ -3119,6 +3120,8 @@ window._wobbleTime = 0;
 function makeWobbleMaterial(origMat, phase, speed, amp) {
   const mat = origMat.clone();
   if (origMat.map) { mat.map = origMat.map; mat.needsUpdate = true; }
+  // edge highlight уже на origMat — клон не наследует onBeforeCompile, патчим снова
+  if (typeof patchEdge === 'function') patchEdge(mat);
 
   const wobbleUniforms = {
     uTime:  { value: 0 },
@@ -3216,81 +3219,53 @@ function updateWobble(dt) {
 // ══════════════════════════════════════════════════════════════════
 
 
+
 // ══════════════════════════════════════════════════════════════════
-// EDGE HIGHLIGHT — Fresnel-подсветка рёбер моделей
-// Добавляет тонкий светлый контур по рёбрам (dot(N,V) → rim)
-// Создаёт иллюзию сглаженности без изменения геометрии
+// EDGE HIGHLIGHT — Fresnel-подсветка рёбер (встраивается при создании материала)
+// patchEdge(mat) вызывается ДО первой компиляции шейдера
 // ══════════════════════════════════════════════════════════════════
-function applyEdgeHighlight(targetScene) {
-  const EDGE_STR   = 0.38;  // яркость подсветки рёбер (0=нет, 1=очень сильно)
-  const EDGE_POWER = 2.8;   // резкость перехода (выше = уже полоска)
+function patchEdge(mat) {
+  if (!mat || mat._edgeDone || mat.isShaderMaterial) return;
+  if (mat.side === THREE.BackSide) return;
+  if (mat.transparent && mat.opacity < 0.85) return;
+  mat._edgeDone = true;
 
-  targetScene.traverse(obj => {
-    if (!obj.isMesh) return;
-    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    mats.forEach(mat => {
-      // Пропускаем: ShaderMaterial (вода), BackSide (отражение), уже патченные
-      if (!mat || mat.isShaderMaterial) return;
-      if (mat.side === THREE.BackSide) return;
-      if (mat._edgeHighlightApplied) return;
-      // Пропускаем прозрачные (вода, пена)
-      if (mat.transparent && mat.opacity < 0.9) return;
+  const ESTR = 0.36;
+  const EPOW = 2.6;
 
-      mat._edgeHighlightApplied = true;
+  const prevOBC = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader) => {
+    if (prevOBC) prevOBC(shader);
 
-      const prevOBC = mat.onBeforeCompile;
-      mat.onBeforeCompile = (shader) => {
-        // Сначала выполняем предыдущий патч (wobble и др.)
-        if (prevOBC) prevOBC(shader);
+    shader.uniforms.uEdgeStr = { value: ESTR };
+    shader.uniforms.uEdgePow = { value: EPOW };
 
-        // Добавляем uniform силы подсветки
-        shader.uniforms.uEdgeStr   = { value: EDGE_STR };
-        shader.uniforms.uEdgePow   = { value: EDGE_POWER };
+    shader.vertexShader   = 'varying vec3 vViewPos;\n' + shader.vertexShader;
+    shader.fragmentShader = 'varying vec3 vViewPos;\n' + shader.fragmentShader;
 
-        // Объявляем uniforms в fragment shader
-        shader.fragmentShader = `
-uniform float uEdgeStr;
-uniform float uEdgePow;
-` + shader.fragmentShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+  vViewPos = - mvPosition.xyz;`
+    );
 
-        // Добавляем varying vViewDir из vertex shader
-        shader.vertexShader = `
-varying vec3 vViewDir;
-` + shader.vertexShader;
+    shader.fragmentShader = 'uniform float uEdgeStr;\nuniform float uEdgePow;\n'
+      + shader.fragmentShader;
 
-        // В конце vertex shader записываем направление к камере
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <fog_vertex>',
-          `#include <fog_vertex>
-  vViewDir = normalize(cameraPosition - (modelMatrix * vec4(position, 1.0)).xyz);`
-        );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `#include <dithering_fragment>
+  {
+    vec3 _n = normalize(vNormal);
+    vec3 _v = normalize(vViewPos);
+    float _f = pow(1.0 - abs(dot(_n, _v)), uEdgePow);
+    gl_FragColor.rgb += _f * uEdgeStr;
+  }`
+    );
+  };
 
-        // Объявляем varying в fragment shader
-        shader.fragmentShader = `
-varying vec3 vViewDir;
-` + shader.fragmentShader;
-
-        // Вставляем Fresnel-подсветку перед финальным gl_FragColor
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          `#include <dithering_fragment>
-  // Fresnel edge highlight: рёбра (где N⊥V) → ярче
-  vec3 _nrm = normalize( vNormal );
-  float _vdotn = abs( dot( _nrm, normalize(vViewDir) ) );
-  float _rim = pow( 1.0 - _vdotn, uEdgePow );
-  gl_FragColor.rgb += _rim * uEdgeStr;`
-        );
-      };
-
-      // customProgramCacheKey чтобы Three.js не кешировал неправильно
-      const prevKey = mat.customProgramCacheKey;
-      mat.customProgramCacheKey = () => {
-        const base = prevKey ? prevKey() : '';
-        return base + '_edge';
-      };
-      mat.needsUpdate = true;
-    });
-  });
+  const prevKey = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => '';
+  mat.customProgramCacheKey = () => prevKey() + '_e';
 }
 // ══════════════════════════════════════════════════════════════════
 
@@ -4279,8 +4254,6 @@ function startGame(mapGrid, customCellData, freeObjsData) {
     });
     buildReflection(); // перестроим отражение с учётом freeObjs
   }
-  // Применяем Fresnel edge highlight на все меши карты
-  applyEdgeHighlight(scene);
   
   // Show game UI
   document.getElementById('main-menu').classList.add('hidden');
