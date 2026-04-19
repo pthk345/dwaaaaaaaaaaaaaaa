@@ -601,93 +601,6 @@ function loadTextureOnce(url) {
   return tex;
 }
 
-
-// ═══════════════════════════════════════════════════════════════════
-// VEGETATION WOBBLE — vertex-shader wind sway for trees, details etc.
-
-// ═══════════════════════════════════════════════════════════════════
-// VEGETATION BEND — smooth organic sway via vertex shader
-//
-// Principle: displacement = sin(time + phase) * amplitude * (y / maxY)^2
-//   • y = 0 (base/grass)   → zero movement, stays planted
-//   • y = maxY (crown)     → full bend amplitude
-//   • Exponent ^1.5: smooth curve, more natural than linear
-//
-// Phase is derived from world XZ hash → every tree has unique timing.
-// Two detuned sines (primary + secondary) → irregular, non-repeating swing.
-// No rotation, no twisting — pure lateral displacement on X and Z.
-// ═══════════════════════════════════════════════════════════════════
-const _WOBBLE_TIME = { value: 0.0 };
-
-function _applyWobble(mat) {
-  if (!mat || mat._wobble) return;
-  mat._wobble = true;
-
-  // Force unique shader program — prevents Three.js shader cache from reusing
-  // a compiled program that doesn't have our wobble code injected
-  mat.customProgramCacheKey = function() { return 'wobble'; };
-
-  mat.onBeforeCompile = function(shader) {
-    shader.uniforms.uWT = _WOBBLE_TIME;
-    // Prepend uniform declaration
-    shader.vertexShader = 'uniform float uWT;\n' + shader.vertexShader;
-    // Inject bend code right after #include <begin_vertex>
-    // 'transformed' is defined there — we modify it in-place
-    var inject = [
-      '',
-      '// === VEGETATION BEND ===',
-      '{',
-      '  vec4 _wp = modelMatrix * vec4(position, 1.0);',
-      '  float _ph = fract(sin(dot(_wp.xz, vec2(127.1,311.7))) * 43758.5453);',
-      '  float _yn = clamp(position.y * 0.6, 0.0, 1.0);',
-      '  float _mask = _yn * _yn;',
-      '  transformed.x += sin(uWT * 0.9 + _ph * 6.283) * 0.10 * _mask;',
-      '  transformed.z += sin(uWT * 0.61 + _ph * 4.712 + 1.57) * 0.06 * _mask;',
-      '}'
-    ].join('\n');
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      '#include <begin_vertex>' + inject
-    );
-  };
-  mat.needsUpdate = true;
-}
-
-// Vegetation keys that should sway (explicit — no sand/rocks/dirt/wood)
-function _isVegetation(key) {
-  if (!key) return false;
-  // Whitelist: only actual plants
-  return (
-    key.includes('tree')   ||
-    key.includes('palm')   ||
-    key.includes('reed')   ||
-    key.includes('bush')   ||
-    key.includes('bamboo') ||
-    key.includes('flower')
-    // crystals: skipped (they're minerals, not plants)
-    // detail_dirt, detail_rocks, detail_dirt_large: skipped (sand/gravel)
-    // detail_tree / detail_tree_large: caught via 'tree'
-  );
-}
-
-function _addWobble(obj) {
-  obj.traverse(function(child) {
-    if (!child.isMesh) return;
-    if (Array.isArray(child.material)) {
-      child.material = child.material.map(function(m) {
-        if (!m || m._wobble) return m;
-        const mc = m.clone(); _applyWobble(mc); return mc;
-      });
-      if (child.material.length === 1) child.material = child.material[0];
-    } else {
-      if (child.material && !child.material._wobble) {
-        const mc = child.material.clone(); _applyWobble(mc); child.material = mc;
-      }
-    }
-  });
-}
-// ═══════════════════════════════════════════════════════════════════
-
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -1405,6 +1318,12 @@ function initThree() {
         }
       });
 
+      // Wobble для камышей — они гнутся сильнее чем деревья
+      const rPhase = Math.random() * Math.PI * 2;
+      const rSpeed = 0.5 + Math.random() * 0.6;
+      const rAmp   = 0.08 + Math.random() * 0.06;
+      applyWobble(model, { phase: rPhase, speed: rSpeed, amp: rAmp });
+
       scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
@@ -1567,9 +1486,15 @@ function buildMap(g, customCellData) {
     obj.position.set(c*TILE_SIZE,0,r*TILE_SIZE);
     obj.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
-    // Apply wobble to vegetation tiles (also snow variants)
-    if (tt === TILE_TREE || _isVegetation(key)) { _addWobble(obj); }
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
+
+    // Wobble для деревьев: уникальная фаза на каждую клетку
+    if (tt === TILE_TREE) {
+      const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2); // хаотичная фаза
+      const speed = 0.6 + ((r * 7 + c * 13) % 100) / 100 * 0.5; // 0.6–1.1 рад/с
+      const amp   = 0.055 + ((r * 3 + c * 17) % 100) / 100 * 0.04; // 0.055–0.095
+      applyWobble(obj, { phase, speed, amp });
+    }
 
     // TILE_ZONE: добавляем selection-a (4 жёлтых угла) поверх тайла
     if(tt===TILE_ZONE) {
@@ -1610,9 +1535,14 @@ function buildMap(g, customCellData) {
     const ox=((h%7)-3)*0.06,oz=((h%5)-2)*0.06;
     det.position.set(c*TILE_SIZE+ox,0,r*TILE_SIZE+oz);
     det.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
-    // Decoration vegetation gets wobble
-    if (_isVegetation(mk)) { _addWobble(det); }
     addToScene(det); tileObjects.push(det);
+    // Wobble для detail деревьев
+    {
+      const dp = (r*1.41+c*2.73+Math.random()) % (Math.PI*2);
+      const ds = 0.5 + Math.random()*0.5;
+      const da = 0.05 + Math.random()*0.04;
+      applyWobble(det, { phase:dp, speed:ds, amp:da });
+    }
   }
   } // end !isEditorMap
 
@@ -3011,14 +2941,121 @@ function buildReflection() {
 let lastTime = 0;
 let rangeRing = null;
 
+
+// ══════════════════════════════════════════════════════════════════
+// WOBBLE — vertex shader качание растительности
+// Работает с едиными тайлами: маска по Y плавно отделяет крону от корней
+// ══════════════════════════════════════════════════════════════════
+window._wobbleObjects = []; // { obj, phase, speed, amp, baseY }
+window._wobbleTime = 0;
+
+// Создаёт ShaderMaterial с wobble из оригинального MeshLambertMaterial
+function makeWobbleMaterial(origMat, phase, speed, amp) {
+  // Vertex shader: нижние вершины неподвижны, верхние гнутся
+  // uMask = smoothstep(0..1) по нормализованной высоте → только крона двигается
+  const vert = `
+    uniform float uTime;
+    uniform float uPhase;
+    uniform float uSpeed;
+    uniform float uAmp;
+    uniform float uYMin;  // мин Y объекта в local space
+    uniform float uYMax;  // макс Y объекта
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    void main() {
+      vNormal = normalMatrix * normal;
+      vUv = uv;
+      vec3 pos = position;
+      // Маска: 0 у основания → 1 у кроны, с плавным переходом
+      float mask = smoothstep(uYMin + (uYMax - uYMin)*0.25,
+                              uYMin + (uYMax - uYMin)*0.75,
+                              position.y);
+      // Два синуса — создают «живое» некруговое качание
+      float windX = sin(uTime * uSpeed + uPhase) * uAmp * mask;
+      float windZ = sin(uTime * uSpeed * 0.7 + uPhase + 1.3) * uAmp * 0.6 * mask;
+      pos.x += windX;
+      pos.z += windZ;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `;
+  const frag = `
+    uniform vec3 uColor;
+    uniform sampler2D uMap;
+    uniform int uHasMap;
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    void main() {
+      vec3 col = uColor;
+      if (uHasMap == 1) col *= texture2D(uMap, vUv).rgb;
+      // Простой Lambert
+      vec3 light = normalize(vec3(-0.5, 1.0, 0.8));
+      float diff = max(dot(normalize(vNormal), light), 0.0) * 0.6 + 0.4;
+      gl_FragColor = vec4(col * diff, 1.0);
+    }
+  `;
+  const uniforms = {
+    uTime:   { value: 0 },
+    uPhase:  { value: phase },
+    uSpeed:  { value: speed },
+    uAmp:    { value: amp },
+    uYMin:   { value: 0 },
+    uYMax:   { value: 1 },
+    uColor:  { value: origMat.color ? origMat.color.clone() : new THREE.Color(0x7bc965) },
+    uMap:    { value: origMat.map || null },
+    uHasMap: { value: origMat.map ? 1 : 0 },
+  };
+  const mat = new THREE.ShaderMaterial({ vertexShader:vert, fragmentShader:frag, uniforms });
+  mat.side = origMat.side || THREE.FrontSide;
+  return mat;
+}
+
+// Применяет wobble к объекту: заменяет материалы всех мешей на shader
+function applyWobble(obj, opts) {
+  const { phase, speed, amp } = opts;
+
+  // Вычисляем bounding box в local space для маски
+  const box = new THREE.Box3().setFromObject(obj);
+  // Конвертируем в local space объекта
+  const invWorld = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const localBox = box.clone().applyMatrix4(invWorld);
+  const yMin = localBox.min.y;
+  const yMax = localBox.max.y;
+  const yRange = yMax - yMin;
+
+  obj.traverse(m => {
+    if (!m.isMesh) return;
+    const origMat = Array.isArray(m.material) ? m.material[0] : m.material;
+    const wMat = makeWobbleMaterial(origMat, phase, speed, amp);
+    // Вычисляем Y диапазон меша в local space объекта
+    const meshBox = new THREE.Box3().setFromObject(m);
+    const localMeshBox = meshBox.clone().applyMatrix4(invWorld);
+    wMat.uniforms.uYMin.value = localMeshBox.min.y;
+    wMat.uniforms.uYMax.value = localMeshBox.max.y;
+    m._origMaterial = origMat;
+    m.material = wMat;
+    m._wobbleMat = wMat;
+  });
+
+  window._wobbleObjects.push({ obj, phase, speed, amp, yMin, yMax });
+}
+
+// Обновляет время для всех wobble материалов
+function updateWobble(dt) {
+  window._wobbleTime += dt;
+  const t = window._wobbleTime;
+  for (const item of window._wobbleObjects) {
+    item.obj.traverse(m => {
+      if (m._wobbleMat) m._wobbleMat.uniforms.uTime.value = t;
+    });
+  }
+}
+// ══════════════════════════════════════════════════════════════════
+
 function gameLoop(ts) {
   animFrameId = requestAnimationFrame(gameLoop);
   
   const dt = Math.min((ts - lastTime) / 1000, 0.1) * gameSpeed;
   lastTime = ts;
-
-  // Обновляем время для wobble-анимации растительности
-  _WOBBLE_TIME.value = ts * 0.001; // vegetation bend time
 
   // Анимация воды — медленный дрейф UV
   if (window._waterMesh && window._waterMesh.material.map) {
@@ -3037,6 +3074,10 @@ function gameLoop(ts) {
       window._foamT * 0.6 % 1
     );
   }
+
+  // ── Wobble анимация растительности ────────────────────────────
+  updateWobble(Math.min((ts - (window._lastWobbleTs || ts)) / 1000, 0.05));
+  window._lastWobbleTs = ts;
 
   // ── Анимация кувшинок и камышей ───────────────────────────
   if (window._lilypadMeshes && window._lilypadMeshes.length > 0) {
@@ -3945,8 +3986,6 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       if (fo.rot) obj.rotation.set(fo.rot.x, fo.rot.y, fo.rot.z);
       obj.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       obj.userData = { freeObj: true, modelKey: fo.modelKey };
-      // Vegetation placed freely also gets wobble
-      if (_isVegetation(fo.modelKey)) _addWobble(obj);
       scene.add(obj);
       tileObjects.push(obj); // чтобы попало в отражение
     });
