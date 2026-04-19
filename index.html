@@ -601,6 +601,71 @@ function loadTextureOnce(url) {
   return tex;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// VEGETATION WOBBLE — vertex-shader wind sway for trees, details etc.
+// Key trick: height mask pins base to ground, crown sways freely.
+// Phase seeded from world-space XZ → no two trees sync.
+// One global uTime uniform updated in gameLoop.
+// ═══════════════════════════════════════════════════════════════════
+const _WOBBLE_TIME = { value: 0.0 };
+const _wobbleMats  = []; // all patched materials for disposal tracking
+
+function _applyWobble(mat) {
+  if (!mat || mat._wobble) return;
+  mat._wobble = true;
+  _wobbleMats.push(mat);
+
+  mat.onBeforeCompile = function(shader) {
+    shader.uniforms.uWobbleTime = _WOBBLE_TIME;
+
+    // Inject uWobbleTime declaration into vertex shader
+    shader.vertexShader = 'uniform float uWobbleTime;\n' + shader.vertexShader;
+
+    // Inject sway after #include <begin_vertex> (where 'transformed' is defined)
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+{
+  // World XZ position → unique phase per tree (no synchronisation)
+  vec4 _wpos = modelMatrix * vec4(position, 1.0);
+  float _ph = fract(sin(dot(_wpos.xz, vec2(127.1, 311.7))) * 43758.5453);
+
+  // Height mask: y < 0.22 = grass base → zero sway.
+  // Above that, sway grows quadratically → crown swings, trunk barely moves.
+  float _h  = max(0.0, position.y - 0.22);
+  float _sw = _h * _h * 0.18;   // 0 at base → gentle at mid → max at crown
+
+  // Two slightly detuned frequencies → natural organic feel
+  float _t1 = uWobbleTime * 1.1  + _ph * 6.2832;
+  float _t2 = uWobbleTime * 0.73 + _ph * 4.1888;
+  transformed.x += sin(_t1) * _sw;
+  transformed.z += cos(_t2) * _sw * 0.75;
+}
+`
+    );
+  };
+  mat.needsUpdate = true;
+}
+
+// Apply wobble to every mesh inside a vegetation object,
+// cloning materials first so grass tiles sharing the same mat are unaffected.
+function _addWobble(obj) {
+  obj.traverse(function(child) {
+    if (!child.isMesh) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    child.material = mats.map(function(m) {
+      if (!m || m._wobble) return m;
+      const mc = m.clone();
+      _applyWobble(mc);
+      return mc;
+    });
+    if (!Array.isArray(child.material)) child.material = child.material; // keep single
+    else if (child.material.length === 1) child.material = child.material[0];
+  });
+}
+// ═══════════════════════════════════════════════════════════════════
+
 class GLBLoader {
   constructor(manager) { this.manager = manager; }
   
@@ -1480,6 +1545,8 @@ function buildMap(g, customCellData) {
     obj.position.set(c*TILE_SIZE,0,r*TILE_SIZE);
     obj.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
+    // Apply wobble to vegetation tiles
+    if (tt === TILE_TREE) { _addWobble(obj); }
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
 
     // TILE_ZONE: добавляем selection-a (4 жёлтых угла) поверх тайла
@@ -1521,6 +1588,10 @@ function buildMap(g, customCellData) {
     const ox=((h%7)-3)*0.06,oz=((h%5)-2)*0.06;
     det.position.set(c*TILE_SIZE+ox,0,r*TILE_SIZE+oz);
     det.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
+    // Decoration trees and bushes get wobble
+    if (mk.includes('tree') || mk.includes('crystal') || mk.includes('detail')) {
+      _addWobble(det);
+    }
     addToScene(det); tileObjects.push(det);
   }
   } // end !isEditorMap
@@ -2925,6 +2996,9 @@ function gameLoop(ts) {
   
   const dt = Math.min((ts - lastTime) / 1000, 0.1) * gameSpeed;
   lastTime = ts;
+
+  // Обновляем время для wobble-анимации растительности
+  _WOBBLE_TIME.value = ts * 0.001;
 
   // Анимация воды — медленный дрейф UV
   if (window._waterMesh && window._waterMesh.material.map) {
