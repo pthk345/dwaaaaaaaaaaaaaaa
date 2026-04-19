@@ -1102,61 +1102,75 @@ function initThree() {
   // ══ ОСВЕЩЕНИЕ — красивый картунный стиль ══════════════════════
 
   // Tone mapping: ACESFilmic даёт приятный контраст и насыщенность
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.85; // -30% от 1.15
+  // ── Soft overcast cozy lighting ─────────────────────────────
+  // Target: reference image style — warm matte, no harsh shadows,
+  // even diffuse fill from all directions, subtle depth.
 
-  // 1. Hemisphere light — небо сверху (тёплый голубой) + земля снизу (тёплый зелёный)
+  // Tone mapping: LinearToneMapping keeps colours flat and matte,
+  // no crushed blacks or blown highlights — matches the clay look.
+  renderer.toneMapping = THREE.LinearToneMapping;
+  renderer.toneMappingExposure = 1.08;
+
+  // 1. Hemisphere — dominant fill, overcast sky feel.
+  //    Sky: warm peachy-cream (like the reference background).
+  //    Ground: muted sage-green bounce.
+  //    High intensity so shadows never go truly dark.
   const hemiLight = new THREE.HemisphereLight(
-    0xc8e8ff,  // skyColor: нежный голубой
-    0x8fc870,  // groundColor: травяной зелёный
-    0.52       // -30% от 0.75
+    0xf5e8d8,  // skyColor: warm cream (overcast sun through haze)
+    0xb8d4a0,  // groundColor: soft sage bounce
+    1.10       // strong — this is the primary fill light
   );
   hemiLight.userData.persistent = true;
   scene.add(hemiLight);
 
-  // 2. Главный солнечный свет — тени рисует только он
-  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55);
-  sunLight.position.set(-8, 22, 12);
+  // 2. Main directional — soft sun, LOW intensity so it just barely
+  //    lifts one side without creating harsh contrast.
+  //    High position, gentle angle for shallow soft shadows.
+  const sunLight = new THREE.DirectionalLight(0xfff0dc, 0.55);
+  sunLight.position.set(-6, 20, 10);
   sunLight.castShadow = true;
 
-  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
+  // 4096 shadow map — maximum resolution for crisp but soft edges
   sunLight.shadow.mapSize.width  = 4096;
   sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near = 0.5;
-  sunLight.shadow.camera.far  = 80;
-  // Охватываем весь остров 20x20 тайлов
-  sunLight.shadow.camera.left   = -25;
-  sunLight.shadow.camera.right  =  25;
-  sunLight.shadow.camera.top    =  25;
-  sunLight.shadow.camera.bottom = -25;
+  sunLight.shadow.camera.near   =  1;
+  sunLight.shadow.camera.far    =  80;
+  // Tight frustum around island for maximum texel density
+  sunLight.shadow.camera.left   = -22;
+  sunLight.shadow.camera.right  =  22;
+  sunLight.shadow.camera.top    =  22;
+  sunLight.shadow.camera.bottom = -22;
 
-  // Ключевые параметры мягких теней без полос:
-  // bias: небольшой отрицательный убирает shadow acne
-  // normalBias: компенсирует артефакты на наклонных поверхностях
-  // radius: размытие PCF — чем больше тем мягче тень
-  sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  12;
+  // bias: -0.0001 eliminates shadow acne on flat surfaces
+  // normalBias: 0.04 removes acne on angled low-poly faces
+  // radius: 8 → very soft PCF penumbra edges, no hard lines
+  sunLight.shadow.bias       = -0.0001;
+  sunLight.shadow.normalBias =  0.04;
+  sunLight.shadow.radius     =  8;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
 
-  // 3. Контровой свет (rim) — холодный голубоватый сзади-справа
-  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.38); // -30%
-  rimLight.position.set(14, 10, -12);
-  rimLight.userData.persistent = true;
-  scene.add(rimLight);
-
-  // 4. Заполняющий свет спереди — поднимает тёмные грани
-  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.28); // -30%
-  fillLight.position.set(5, 6, 18);
+  // 3. Soft fill from opposite side (no shadows) — removes any
+  //    dark patches, balances the scene from all angles.
+  //    Cool blue-lavender like overcast sky light from behind.
+  const fillLight = new THREE.DirectionalLight(0xd0dff5, 0.40);
+  fillLight.position.set(10, 8, -14);
   fillLight.userData.persistent = true;
   scene.add(fillLight);
 
-  // 5. Минимальный ambient
-  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.13); // -30%
+  // 4. Warm front fill — lifts shadows facing camera, cozy feel.
+  const frontLight = new THREE.DirectionalLight(0xfde8cc, 0.30);
+  frontLight.position.set(3, 5, 20);
+  frontLight.userData.persistent = true;
+  scene.add(frontLight);
+
+  // 5. Strong ambient — ensures no surface goes dark.
+  //    This is the "overcast sky" catch-all.
+  const ambLight = new THREE.AmbientLight(0xf0ece8, 0.55);
   ambLight.userData.persistent = true;
   scene.add(ambLight);
+  // ─────────────────────────────────────────────────────────────
 
   // ══════════════════════════════════════════════════════════════
 
