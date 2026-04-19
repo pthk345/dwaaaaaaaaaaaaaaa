@@ -3218,88 +3218,119 @@ function updateWobble(dt) {
 // ══════════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════════
-// CEL-SHADING OUTLINE — только граничные рёбра острова
+// CEL-SHADING OUTLINE — реализация OutlineEffect как в Three.js addons
 //
-// Строим вертикальные «стенки» только по внешнему периметру острова:
-// там где тайл граничит с пустотой. Стенка тонкая (~10% тайла),
-// рендерится тёмным, depthTest=false чтобы точно было видно.
-// Внутри острова ничего не рисуем — сетки нет.
+// Два прохода рендера:
+// 1. Обычный рендер сцены
+// 2. Второй проход — только тайлы острова, BackSide, вершины
+//    смещены наружу по нормали в clip-space → тёмный контур
+//
+// Тайлы помечаются на Layer 1. Второй проход рендерит только Layer 1
+// с outline-материалом. Деревья и башни — на Layer 0, их не трогаем.
 // ══════════════════════════════════════════════════════════════════
 
-function buildCelOutlines() {
-  const old = scene.children.filter(o => o.userData.isCelOutline);
-  old.forEach(o => scene.remove(o));
+const OUTLINE_LAYER = 1;
 
-  const S    = TILE_SIZE;
-  const W    = S * 0.10;   // ширина полоски outline (10% тайла)
-  const YBOT = -0.05;      // низ стенки
-  const YTOP =  0.22;      // верх стенки — чуть выше верхней грани тайла
+// Outline material — работает как THREE.OutlineEffect внутри
+const _outlineVertSrc = `
+uniform float outlineThickness;
+uniform vec3  outlineColor;
 
-  const occupied = (r, c) =>
-    r >= 0 && r < GRID_H && c >= 0 && c < GRID_W &&
-    tileMeshGrid[r] && tileMeshGrid[r][c] !== null;
+vec4 calculateOutline(vec4 pos, vec3 objectNormal, vec4 skinned) {
+  float thickness = outlineThickness;
+  const float ratio = 1.0;
+  vec4 pos2 = projectionMatrix * modelViewMatrix * vec4(skinned.xyz + objectNormal, 1.0);
+  vec4 norm = normalize(pos2 - pos);
+  return pos + norm * thickness * pos.w * ratio;
+}
 
-  const verts = [];
-  const idx   = [];
+void main() {
+  vec3 outlineNormal = normal;
+  vec4 skinned = vec4(position, 1.0);
+  vec4 mvPosition = modelViewMatrix * skinned;
+  vec4 clipPos = projectionMatrix * mvPosition;
+  gl_Position = calculateOutline(clipPos, outlineNormal, skinned);
+}
+`;
 
-  const addQuad = (ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) => {
-    const base = verts.length / 3;
-    verts.push(ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz);
-    idx.push(base,base+1,base+2, base,base+2,base+3);
-  };
+const _outlineFragSrc = `
+uniform vec3 outlineColor;
+void main() {
+  gl_FragColor = vec4(outlineColor, 1.0);
+}
+`;
 
-  for (let r = 0; r < GRID_H; r++) {
-    for (let c = 0; c < GRID_W; c++) {
-      if (!occupied(r, c)) continue;
+let _outlineMaterial = null;
 
-      const x0 = c * S - S * 0.5;
-      const x1 = c * S + S * 0.5;
-      const z0 = r * S - S * 0.5;
-      const z1 = r * S + S * 0.5;
-
-      // North edge — сосед сверху пустой
-      if (!occupied(r-1, c)) {
-        // Полоска вдоль северного края, направлена внутрь острова
-        addQuad(x0,YTOP,z0,  x1,YTOP,z0,  x1,YTOP,z0+W,  x0,YTOP,z0+W);
-        addQuad(x0,YBOT,z0,  x0,YTOP,z0,  x1,YTOP,z0,  x1,YBOT,z0); // вертикальная грань
-      }
-      // South edge
-      if (!occupied(r+1, c)) {
-        addQuad(x0,YTOP,z1-W, x1,YTOP,z1-W, x1,YTOP,z1, x0,YTOP,z1);
-        addQuad(x0,YBOT,z1,  x1,YBOT,z1,  x1,YTOP,z1,  x0,YTOP,z1);
-      }
-      // West edge
-      if (!occupied(r, c-1)) {
-        addQuad(x0,YTOP,z0,  x0+W,YTOP,z0,  x0+W,YTOP,z1,  x0,YTOP,z1);
-        addQuad(x0,YBOT,z0,  x0,YTOP,z0,  x0,YTOP,z1,  x0,YBOT,z1);
-      }
-      // East edge
-      if (!occupied(r, c+1)) {
-        addQuad(x1-W,YTOP,z0, x1,YTOP,z0, x1,YTOP,z1, x1-W,YTOP,z1);
-        addQuad(x1,YBOT,z0,  x1,YBOT,z1,  x1,YTOP,z1,  x1,YTOP,z0);
-      }
-    }
-  }
-
-  if (verts.length === 0) return;
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-
-  const mat = new THREE.MeshBasicMaterial({
-    color:      0x111111,
-    side:       THREE.DoubleSide,
+function getOutlineMaterial() {
+  if (_outlineMaterial) return _outlineMaterial;
+  _outlineMaterial = new THREE.ShaderMaterial({
+    vertexShader:   _outlineVertSrc,
+    fragmentShader: _outlineFragSrc,
+    uniforms: {
+      outlineThickness: { value: 0.008 },
+      outlineColor:     { value: new THREE.Color(0x111111) },
+    },
+    side:       THREE.BackSide,
     depthWrite: true,
     depthTest:  true,
   });
+  return _outlineMaterial;
+}
 
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.renderOrder = 3;
-  mesh.userData.isCelOutline = true;
-  scene.add(mesh);
-  _sceneObjects.push(mesh);
+// Помечаем тайл и всех его детей на OUTLINE_LAYER
+function markTileForOutline(obj) {
+  obj.traverse(child => {
+    if (child.isMesh) {
+      child.layers.enable(OUTLINE_LAYER);
+    }
+  });
+}
+
+// Убираем все метки outline
+function clearOutlineLayer() {
+  scene.traverse(obj => {
+    if (obj.isMesh) obj.layers.disable(OUTLINE_LAYER);
+  });
+}
+
+// buildCelOutlines — вызывается после buildMap
+// Помечает только тайлы карты (не деревья отдельно, не башни, не враги)
+function buildCelOutlines() {
+  clearOutlineLayer();
+  tileObjects.forEach(obj => {
+    if (obj.userData && obj.userData.type === 'tile') {
+      markTileForOutline(obj);
+    }
+  });
+}
+
+// renderOutlinePass — вызывается в gameLoop ПОСЛЕ основного рендера
+function renderOutlinePass() {
+  if (!camera || !scene) return;
+
+  const outMat  = getOutlineMaterial();
+  const origMasks = [];
+
+  // 1. Переключаем camera на видеть только OUTLINE_LAYER
+  //    Сохраняем оригинальные материалы и подменяем на outline
+  const meshesToOutline = [];
+  scene.traverse(obj => {
+    if (obj.isMesh && obj.layers.isEnabled(OUTLINE_LAYER)) {
+      meshesToOutline.push({ mesh: obj, mat: obj.material });
+      obj.material = outMat;
+    }
+  });
+
+  if (meshesToOutline.length === 0) return;
+
+  // 2. Рендерим поверх с autoClear=false
+  renderer.autoClear = false;
+  renderer.render(scene, camera);
+  renderer.autoClear = true;
+
+  // 3. Возвращаем оригинальные материалы
+  meshesToOutline.forEach(({ mesh, mat }) => { mesh.material = mat; });
 }
 // ══════════════════════════════════════════════════════════════════
 
@@ -3377,6 +3408,7 @@ function gameLoop(ts) {
 
   if (gameState !== 'playing') {
     renderer.render(scene, camera);
+    renderOutlinePass();
     return;
   }
   
@@ -3389,6 +3421,7 @@ function gameLoop(ts) {
   checkWaveComplete();
   
   renderer.render(scene, camera);
+  renderOutlinePass();
 }
 
 function updateEnemies(dt) {
