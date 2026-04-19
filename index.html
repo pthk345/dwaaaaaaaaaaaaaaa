@@ -1215,11 +1215,11 @@ function initThree() {
 
     const WATER_Y_LIL = _MIRROR_Y + 0.05;
 
-    // Воспроизводимый псевдорандом
+    // Псевдорандом (воспроизводимый)
     let seed = 137;
     const rand = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff; };
 
-    // Масштабируем модель до нужного worldSize
+    // Хелпер: масштабируем модель до нужного worldSize
     const scaleToWorld = (obj, worldSize) => {
       const b = new THREE.Box3().setFromObject(obj);
       const s = new THREE.Vector3(); b.getSize(s);
@@ -1227,78 +1227,44 @@ function initThree() {
       if (m > 0.001) { const f = worldSize / m; obj.scale.set(f, f, f); }
     };
 
-    const ISLAND_R = (GRID_W * TILE_SIZE) * 0.52;
+    const ISLAND_R = (GRID_W * TILE_SIZE) * 0.55;
+    const OCEAN_R  = ISLAND_R * 3.2;
     const CX = (GRID_W-1)/2*TILE_SIZE;
     const CZ = (GRID_H-1)/2*TILE_SIZE;
 
-    // Количество кувшинок: 17–19
-    const LILY_COUNT = 17 + Math.floor(rand() * 3); // 17, 18 или 19
-
-    // Два вида: одиночная (lilywater) и большая (lilywaterbig)
-    // Пропорция: ~2/3 одиночных, ~1/3 больших
-    for (let i = 0; i < LILY_COUNT; i++) {
-      // Тип: большая кувшинка ≈ каждая третья
-      const isBig = (i % 3 === 2) || rand() < 0.32;
-      const key = isBig ? 'lilywaterbig' : 'lilywater';
-
+    // ── Кувшинки: 22 штуки, размер 0.5–0.9 units ─────────
+    const LILY_KEYS = ['lilywater','lilywater','lilywater','lilywaterbig','lilywaterbig'];
+    for (let i = 0; i < 22; i++) {
+      const key = LILY_KEYS[Math.floor(rand() * LILY_KEYS.length)];
       const model = assets.clone(key);
       if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
+      // Добавляем в сцену ДО scaleToWorld — иначе Box3 пустой
       scene.add(model);
-
-      // Размер: большая — крупнее
-      const worldSz = isBig
-        ? 0.85 + rand() * 0.55   // 0.85–1.40
-        : 0.45 + rand() * 0.40;  // 0.45–0.85
+      const worldSz = 0.6 + rand() * 0.5;
       scaleToWorld(model, worldSz);
 
-      // Позиция: хаотично рассыпаны вокруг острова на разных дистанциях
-      // Некоторые близко к берегу, некоторые далеко — имитирует «течение»
-      const angle  = rand() * Math.PI * 2;
-      // Неравномерное распределение расстояний — используем квадратичное для скопления у берега
-      const tDist  = rand();
-      const dist   = ISLAND_R * (1.05 + tDist * tDist * 2.2); // ближние скапливаются, дальние рассеяны
-      const px     = Math.cos(angle) * dist + (rand()-0.5) * ISLAND_R * 0.3; // добавляем случайное смещение
-      const pz     = Math.sin(angle) * dist + (rand()-0.5) * ISLAND_R * 0.3;
+      // Позиция: рядом с островом — видно игроку
+      const angle = rand() * Math.PI * 2;
+      const dist  = ISLAND_R * (1.0 + rand() * 1.0);
+      const px    = Math.cos(angle) * dist;
+      const pz    = Math.sin(angle) * dist;
 
       model.position.set(CX + px, WATER_Y_LIL, CZ + pz);
       model.rotation.y = rand() * Math.PI * 2;
 
-      // Параметры анимации — уникальные для каждой кувшинки
-      const lilySpeed   = 0.28 + rand() * 0.42; // скорость покачивания
-      const lilyAmpX    = 0.025 + rand() * 0.035; // амплитуда наклона X
-      const lilyAmpZ    = 0.020 + rand() * 0.030; // амплитуда наклона Z
-      const lilyPhaseX  = rand() * Math.PI * 2;
-      const lilyPhaseZ  = rand() * Math.PI * 2;
-      const lilyRotY    = (rand()-0.5) * 0.008;   // медленное вращение
-
-      // ТЕЧЕНИЕ: направление и скорость дрейфа — имитирует поток воды
-      // Общее направление воды слегка смещено (например, на северо-восток)
-      const currentAngle  = 0.4 + rand() * 0.6;  // угол «течения» у каждой кувшинки слегка разный
-      const currentSpeed  = 0.00012 + rand() * 0.00018; // скорость дрейфа
-      const driftX = Math.cos(currentAngle) * currentSpeed;
-      const driftZ = Math.sin(currentAngle) * currentSpeed;
-
-      // Радиус «зоны жизни» — когда кувшинка уплывает слишком далеко, она возвращается с другой стороны
-      const spawnX = CX + px;
-      const spawnZ = CZ + pz;
-
-      model.userData = {
-        lilyT:      rand() * Math.PI * 2, // стартовая фаза — разные кувшинки покачиваются не синхронно
-        lilySpeed,
-        lilyAmpX, lilyAmpZ,
-        lilyPhaseX, lilyPhaseZ,
-        lilyRotY,
-        lilyDriftX: driftX,
-        lilyDriftZ: driftZ,
-        baseY:      WATER_Y_LIL,
-        isLilypad:  true,
-        persistent: true,
-        // Стартовая позиция — для зацикливания (кувшинка уплыла → возврат)
-        spawnX, spawnZ,
-        maxDrift:   ISLAND_R * 3.5, // максимальное расстояние дрейфа
-      };
-
+      model.userData.lilyT      = rand() * Math.PI * 2;
+      model.userData.lilyPhaseX = rand() * Math.PI * 2;
+      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
+      model.userData.lilySpeed  = 0.35 + rand() * 0.45;
+      model.userData.lilyAmpX   = 0.04 + rand() * 0.05;
+      model.userData.lilyAmpZ   = 0.04 + rand() * 0.05;
+      model.userData.lilyDriftX   = (rand()-0.5)*0.0004;
+      model.userData.lilyDriftZ   = (rand()-0.5)*0.0004;
+      model.userData.lilyRotY     = (rand()-0.5)*0.010;  // вращение вокруг Y
+      model.userData.baseY        = WATER_Y_LIL;
+      model.userData.isLilypad    = true;
+      model.userData.persistent = true;
       model.traverse(m => {
         if (m.isMesh) {
           m.castShadow    = false;
@@ -1523,15 +1489,6 @@ function buildMap(g, customCellData) {
       const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2); // хаотичная фаза
       const speed = 0.6 + ((r * 7 + c * 13) % 100) / 100 * 0.5; // 0.6–1.1 рад/с
       const amp   = 0.055 + ((r * 3 + c * 17) % 100) / 100 * 0.04; // 0.055–0.095
-      applyWobble(obj, { phase, speed, amp });
-    }
-
-    // Wobble для пальм (из pirate kit) — точно такая же анимация как у деревьев
-    const _palmKeys = ['pirate_palm_bend','pirate_palm_straight','pirate_palm_detailed_bend','pirate_palm_detailed_straight'];
-    if (key && _palmKeys.includes(key)) {
-      const phase = (r * 3.14 + c * 2.72 + 0.5) % (Math.PI * 2);
-      const speed = 0.5 + ((r * 11 + c * 7) % 100) / 100 * 0.45; // 0.5–0.95 рад/с
-      const amp   = 0.06 + ((r * 5 + c * 19) % 100) / 100 * 0.045; // чуть сильнее чем деревья
       applyWobble(obj, { phase, speed, amp });
     }
 
@@ -2998,23 +2955,8 @@ window._wobbleTime = 0;
 // makeWobbleMaterial: патчим MeshLambertMaterial через onBeforeCompile.
 // Сохраняет ВСЁ родное освещение Three.js — никакой темноты.
 function makeWobbleMaterial(origMat, phase, speed, amp) {
-  // Клонируем оригинальный материал, сохраняя ВСЕ его свойства (цвет, текстуры, освещение)
-  let mat;
-  if (origMat && origMat.clone) {
-    mat = origMat.clone();
-    // Явно копируем ключевые свойства чтобы не потерять яркость
-    if (origMat.map)          mat.map          = origMat.map;
-    if (origMat.color)        mat.color.copy(origMat.color);
-    if (origMat.emissive)     mat.emissive.copy(origMat.emissive);
-    if (origMat.emissiveMap)  mat.emissiveMap  = origMat.emissiveMap;
-    mat.emissiveIntensity     = origMat.emissiveIntensity !== undefined ? origMat.emissiveIntensity : 0;
-    mat.side                  = origMat.side !== undefined ? origMat.side : THREE.FrontSide;
-    mat.transparent           = origMat.transparent || false;
-    mat.opacity               = origMat.opacity !== undefined ? origMat.opacity : 1.0;
-  } else {
-    mat = new THREE.MeshLambertMaterial();
-  }
-
+  const mat = origMat.clone ? origMat.clone() : new THREE.MeshLambertMaterial();
+  // Шаримся uniforms в userData чтобы обновлять uTime каждый кадр
   const wUniforms = {
     uTime:  { value: 0 },
     uPhase: { value: phase },
@@ -3026,6 +2968,7 @@ function makeWobbleMaterial(origMat, phase, speed, amp) {
   mat.userData._wobbleU = wUniforms;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, wUniforms);
+    // Объявляем uniforms
     shader.vertexShader =
       `uniform float uTime;
 uniform float uPhase;
@@ -3035,6 +2978,7 @@ uniform float uYMin;
 uniform float uYMax;
 `
       + shader.vertexShader;
+    // Инжектируем displacement после #include <begin_vertex>
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
@@ -3126,44 +3070,25 @@ function gameLoop(ts) {
 
   // ── Анимация кувшинок и камышей ───────────────────────────
   if (window._lilypadMeshes && window._lilypadMeshes.length > 0) {
-    const rawDt = Math.min((ts - (window._lastLilyTs || ts)) / 1000, 0.05);
-    window._lastLilyTs = ts;
+    const realDt = Math.min((ts - lastTime) / 1000, 0.1); // без gameSpeed — на воде независимо
     for (const m of window._lilypadMeshes) {
       if (!m.userData.isLilypad) continue;
-      m.userData.lilyT += rawDt * m.userData.lilySpeed;
+      m.userData.lilyT += realDt * m.userData.lilySpeed;
       const t = m.userData.lilyT;
-
-      // Покачивание: два слоя синусов для «живого» эффекта
-      m.rotation.x = Math.sin(t   + m.userData.lilyPhaseX)        * m.userData.lilyAmpX
-                   + Math.sin(t*2.3 + m.userData.lilyPhaseX*0.7) * m.userData.lilyAmpX * 0.35;
-      m.rotation.z = Math.cos(t*0.8 + m.userData.lilyPhaseZ)      * m.userData.lilyAmpZ
-                   + Math.cos(t*1.7 + m.userData.lilyPhaseZ*0.5) * m.userData.lilyAmpZ * 0.25;
-
-      // Волна по Y — кувшинка приподнимается на гребне
+      // Качание: плавный синус по X и Z
+      // Два синуса — «живое» покачивание
+      m.rotation.x = Math.sin(t + m.userData.lilyPhaseX) * m.userData.lilyAmpX
+                   + Math.sin(t*1.9 + m.userData.lilyPhaseX*0.5) * m.userData.lilyAmpX*0.3;
+      m.rotation.z = Math.cos(t*0.7 + m.userData.lilyPhaseZ) * m.userData.lilyAmpZ
+                   + Math.cos(t*1.4 + m.userData.lilyPhaseZ*0.7) * m.userData.lilyAmpZ*0.3;
+      // Волна по Y
       m.position.y = m.userData.baseY
-                   + Math.sin(t*0.7  + m.userData.lilyPhaseX) * 0.018
-                   + Math.sin(t*1.5  + m.userData.lilyPhaseZ) * 0.008
-                   + Math.sin(t*0.31 + (m.userData.lilyPhaseX||0)*0.3) * 0.005;
-
-      // Медленное вращение вокруг Y (уносится течением)
-      if (m.userData.lilyRotY) m.rotation.y += rawDt * m.userData.lilyRotY;
-
-      // ТЕЧЕНИЕ: дрейф по воде
-      if (m.userData.lilyDriftX || m.userData.lilyDriftZ) {
-        m.position.x += m.userData.lilyDriftX;
-        m.position.z += m.userData.lilyDriftZ;
-
-        // Зацикливание: если кувшинка уплыла слишком далеко — возвращаем
-        if (m.userData.spawnX !== undefined) {
-          const dx = m.position.x - m.userData.spawnX;
-          const dz = m.position.z - m.userData.spawnZ;
-          const driftDist = Math.sqrt(dx*dx + dz*dz);
-          if (driftDist > (m.userData.maxDrift || 20)) {
-            m.position.x = m.userData.spawnX - dx * 0.98;
-            m.position.z = m.userData.spawnZ - dz * 0.98;
-          }
-        }
-      }
+                   + Math.sin(t*0.8 + m.userData.lilyPhaseX)*0.022
+                   + Math.sin(t*1.6 + m.userData.lilyPhaseZ)*0.009;
+      // Медленное вращение вокруг Y + дрейф
+      if (m.userData.lilyRotY) m.rotation.y += realDt * m.userData.lilyRotY;
+      m.position.x += m.userData.lilyDriftX;
+      m.position.z += m.userData.lilyDriftZ;
     }
   }
 
