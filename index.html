@@ -3218,63 +3218,66 @@ function updateWobble(dt) {
 // ══════════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════════
-// CEL-SHADING OUTLINE — силуэт острова через плоский шейдер
+// CEL-SHADING OUTLINE — только граничные рёбра острова
 //
-// Подход: строим одну плоскую сетку из квадратов точно по форме
-// острова (tileMeshGrid), слегка увеличиваем её наружу (expand),
-// рендерим тёмным цветом ПОД тайлами. Никаких inverted-hull на
-// отдельных мешах → никакой внутренней сетки, никаких артефактов
-// на деревьях.
+// Строим вертикальные «стенки» только по внешнему периметру острова:
+// там где тайл граничит с пустотой. Стенка тонкая (~10% тайла),
+// рендерится тёмным, depthTest=false чтобы точно было видно.
+// Внутри острова ничего не рисуем — сетки нет.
 // ══════════════════════════════════════════════════════════════════
 
 function buildCelOutlines() {
-  // Убираем старый outline если есть
   const old = scene.children.filter(o => o.userData.isCelOutline);
-  old.forEach(o => { scene.remove(o); });
+  old.forEach(o => scene.remove(o));
 
-  const S   = TILE_SIZE;          // размер тайла
-  const EXP = S * 0.13;           // насколько выступает наружу (13% от тайла)
-  const Y   = -0.01;              // чуть ниже поверхности тайлов
+  const S    = TILE_SIZE;
+  const W    = S * 0.10;   // ширина полоски outline (10% тайла)
+  const YBOT = -0.05;      // низ стенки
+  const YTOP =  0.22;      // верх стенки — чуть выше верхней грани тайла
 
-  // Карта занятых клеток
   const occupied = (r, c) =>
-    r >= 0 && r < GRID_H && c >= 0 && c < GRID_W && tileMeshGrid[r] && tileMeshGrid[r][c] !== null;
+    r >= 0 && r < GRID_H && c >= 0 && c < GRID_W &&
+    tileMeshGrid[r] && tileMeshGrid[r][c] !== null;
 
   const verts = [];
   const idx   = [];
 
-  // Для каждой занятой клетки строим расширенный quad.
-  // Каждый quad — отдельный прямоугольник, но смежные стороны
-  // между занятыми соседями НЕ добавляем расширение — только наружу.
+  const addQuad = (ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) => {
+    const base = verts.length / 3;
+    verts.push(ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz);
+    idx.push(base,base+1,base+2, base,base+2,base+3);
+  };
+
   for (let r = 0; r < GRID_H; r++) {
     for (let c = 0; c < GRID_W; c++) {
       if (!occupied(r, c)) continue;
 
-      // Базовые координаты клетки
-      const cx = c * S;
-      const cz = r * S;
+      const x0 = c * S - S * 0.5;
+      const x1 = c * S + S * 0.5;
+      const z0 = r * S - S * 0.5;
+      const z1 = r * S + S * 0.5;
 
-      // Расширяем каждую сторону только если сосед пустой
-      const expN = occupied(r-1, c) ? 0 : EXP;
-      const expS = occupied(r+1, c) ? 0 : EXP;
-      const expW = occupied(r,  c-1) ? 0 : EXP;
-      const expE = occupied(r,  c+1) ? 0 : EXP;
-
-      const x0 = cx - S*0.5 - expW;
-      const x1 = cx + S*0.5 + expE;
-      const z0 = cz - S*0.5 - expN;
-      const z1 = cz + S*0.5 + expS;
-
-      const base = verts.length / 3;
-      // 4 угла quad
-      verts.push(x0, Y, z0);  // 0: NW
-      verts.push(x1, Y, z0);  // 1: NE
-      verts.push(x1, Y, z1);  // 2: SE
-      verts.push(x0, Y, z1);  // 3: SW
-
-      // 2 треугольника
-      idx.push(base,   base+1, base+2);
-      idx.push(base,   base+2, base+3);
+      // North edge — сосед сверху пустой
+      if (!occupied(r-1, c)) {
+        // Полоска вдоль северного края, направлена внутрь острова
+        addQuad(x0,YTOP,z0,  x1,YTOP,z0,  x1,YTOP,z0+W,  x0,YTOP,z0+W);
+        addQuad(x0,YBOT,z0,  x0,YTOP,z0,  x1,YTOP,z0,  x1,YBOT,z0); // вертикальная грань
+      }
+      // South edge
+      if (!occupied(r+1, c)) {
+        addQuad(x0,YTOP,z1-W, x1,YTOP,z1-W, x1,YTOP,z1, x0,YTOP,z1);
+        addQuad(x0,YBOT,z1,  x1,YBOT,z1,  x1,YTOP,z1,  x0,YTOP,z1);
+      }
+      // West edge
+      if (!occupied(r, c-1)) {
+        addQuad(x0,YTOP,z0,  x0+W,YTOP,z0,  x0+W,YTOP,z1,  x0,YTOP,z1);
+        addQuad(x0,YBOT,z0,  x0,YTOP,z0,  x0,YTOP,z1,  x0,YBOT,z1);
+      }
+      // East edge
+      if (!occupied(r, c+1)) {
+        addQuad(x1-W,YTOP,z0, x1,YTOP,z0, x1,YTOP,z1, x1-W,YTOP,z1);
+        addQuad(x1,YBOT,z0,  x1,YBOT,z1,  x1,YTOP,z1,  x1,YTOP,z0);
+      }
     }
   }
 
@@ -3283,18 +3286,18 @@ function buildCelOutlines() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   geo.setIndex(idx);
+  geo.computeVertexNormals();
 
   const mat = new THREE.MeshBasicMaterial({
-    color:       0x15120a,   // очень тёмный, почти чёрный
-    side:        THREE.FrontSide,
-    depthWrite:  true,
-    depthTest:   true,
+    color:      0x111111,
+    side:       THREE.DoubleSide,
+    depthWrite: true,
+    depthTest:  true,
   });
 
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.renderOrder = 0;
-  mesh.userData.isCelOutline  = true;
-  mesh.userData.persistent    = false;
+  mesh.renderOrder = 3;
+  mesh.userData.isCelOutline = true;
   scene.add(mesh);
   _sceneObjects.push(mesh);
 }
