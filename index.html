@@ -371,7 +371,7 @@ box-shadow:0 6px 0 #000;
 
 <!-- Main Menu -->
 
-<div id="main-menu" class="screen hidden" style="position:relative;">
+<div id="main-menu" class="screen hidden">
   <button id="btn-music-menu" title="Music on/off">
     <img id="btn-music-menu-icon" src="assets/icons/ic_music_on.png">
   </button>
@@ -432,7 +432,7 @@ box-shadow:0 6px 0 #000;
     <button id="btn-music">
       <img id="btn-music-icon" src="assets/icons/ic_music_on.png">
     </button>
-    <button id="btn-speed">1x</button>
+    <button id="btn-speed"><span id="speed-txt">1x</span></button>
   </div>
 
   <div id="wave-info" style="display:none">Ready</div>
@@ -1012,6 +1012,7 @@ let THREE_loaded = false;
 let assets = null;
 let renderer, scene, camera, raycaster;
 let _reflGroup = null;  // Клон карты — отражение
+let _persistentObjects = []; // объекты которые не удаляются при clearScene (вода, кувшинки)
 let gameState = 'menu';
 let animFrameId = null;
 
@@ -1245,6 +1246,7 @@ function initThree() {
 
       // Сначала добавляем в сцену — без этого Box3.setFromObject даёт пустой бокс
       scene.add(model);
+      model.updateMatrixWorld(true); // принудительно обновляем матрицу до scaleToWorld
 
       // Теперь масштабируем — Box3 работает корректно
       const worldSz = isBig ? (0.75 + rand() * 0.55) : (0.40 + rand() * 0.38);
@@ -1302,6 +1304,9 @@ function initThree() {
       if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
       // Камыши немного выше (они вертикальные)
+      // Сначала в сцену, потом scale — иначе Box3 пустой
+      scene.add(model);
+      model.updateMatrixWorld(true);
       const worldSz = 0.7 + rand() * 0.5;
       scaleToWorld(model, worldSz);
 
@@ -1337,8 +1342,6 @@ function initThree() {
       const rSpeed = 0.5 + Math.random() * 0.6;
       const rAmp   = 0.08 + Math.random() * 0.06;
       applyWobble(model, { phase: rPhase, speed: rSpeed, amp: rAmp });
-
-      scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
@@ -1430,12 +1433,22 @@ function addToScene(obj) {
 }
 
 function clearScene() {
-  // Удаляем всё кроме объектов с userData.persistent = true
+  // Удаляем всё кроме постоянных объектов (свет, вода, небо)
   const toRemove = scene.children.filter(o => !o.userData.persistent);
   toRemove.forEach(o => scene.remove(o));
-  // Отражение и оверлей
+
+  // Очищаем кувшинки из сцены (они persistent, но пересоздаются каждый раз)
+  if (window._lilypadMeshes) {
+    window._lilypadMeshes.forEach(m => { if (m.parent) m.parent.remove(m); });
+    window._lilypadMeshes = [];
+  }
+  // Убираем их из _persistentObjects тоже
+  _persistentObjects = _persistentObjects.filter(o => !o.userData.isLilypad);
+
+  // Сбрасываем список wobble-объектов — они пересоздадутся при buildMap
+  window._wobbleObjects = [];
+
   _reflGroup = null;
-  // НЕ трогаем scene.background — вызывающий код сам выставляет нужный фон
   _sceneObjects = [];
   tileObjects = [];
   tileMeshGrid = Array.from({length:GRID_H},()=>Array(GRID_W).fill(null));
@@ -4044,6 +4057,8 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   
   // Build 3D map
   buildMap(grid, customCellData || null);
+  // Пересоздаём кувшинки (clearScene их убрала из _persistentObjects тоже)
+  if (window._spawnLilypads) window._spawnLilypads();
   buildReflection();
   // Загружаем свободно размещённые объекты (декор не на сетке)
   if (freeObjsData && freeObjsData.length > 0) {
