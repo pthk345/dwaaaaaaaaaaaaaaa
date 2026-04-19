@@ -1470,24 +1470,24 @@ function buildMap(g, customCellData) {
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
 
-    // Wobble для деревьев: уникальная фаза на каждую клетку
+    // Wobble для деревьев: качаем только крону (выше Y=0.25), тайл земли неподвижен
     if (tt === TILE_TREE) {
       try {
         const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2);
         const speed = 1.2 + ((r * 7 + c * 13) % 100) / 100 * 1.0;
         const amp   = 0.08 + ((r * 3 + c * 17) % 100) / 100 * 0.06;
-        applyWobble(obj, { phase, speed, amp });
+        applyWobble(obj, { phase, speed, amp, yThreshold: 0.25 });
       } catch(e) { console.warn('wobble tree error:', e); }
     }
 
-    // Wobble для пальм (pirate kit) — та же анимация что у деревьев
+    // Wobble для пальм — качается весь ствол от корня
     const _PALM_KEYS = ['pirate_palm_bend','pirate_palm_straight','pirate_palm_detailed_bend','pirate_palm_detailed_straight'];
     if (key && _PALM_KEYS.includes(key)) {
       try {
         const phase = (r * 3.14 + c * 2.72 + 0.5) % (Math.PI * 2);
         const speed = 1.0 + ((r * 11 + c * 7) % 100) / 100 * 0.9;
         const amp   = 0.09 + ((r * 5 + c * 19) % 100) / 100 * 0.07;
-        applyWobble(obj, { phase, speed, amp });
+        applyWobble(obj, { phase, speed, amp, yThreshold: -99 }); // весь объект
       } catch(e) { console.warn('wobble palm error:', e); }
     }
 
@@ -1531,12 +1531,12 @@ function buildMap(g, customCellData) {
     det.position.set(c*TILE_SIZE+ox,0,r*TILE_SIZE+oz);
     det.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     addToScene(det); tileObjects.push(det);
-    // Wobble для detail деревьев
+    // Wobble для detail деревьев — качаем только крону
     try {
       const dp = (r*1.41+c*2.73+Math.random()) % (Math.PI*2);
       const ds = 1.0 + Math.random()*1.0;
       const da = 0.07 + Math.random()*0.06;
-      applyWobble(det, { phase:dp, speed:ds, amp:da });
+      applyWobble(det, { phase:dp, speed:ds, amp:da, yThreshold: 0.2 });
     } catch(e) { console.warn('wobble deco error:', e); }
   }
   } // end !isEditorMap
@@ -2961,24 +2961,83 @@ let rangeRing = null;
 
 
 // ══════════════════════════════════════════════════════════════════
-// WOBBLE — простая надёжная анимация качания деревьев через rotation
-// Не использует шейдеры — просто вращает объект туда-обратно
+// WOBBLE — анимация качания только кроны дерева (не тайла травы под ней)
+// Находим все меши выше порогового Y, оборачиваем их в pivot-группу
+// и качаем только её — тайл земли остаётся неподвижным
 // ══════════════════════════════════════════════════════════════════
 window._wobbleObjects = [];
 window._wobbleTime = 0;
 
 function makeWobbleMaterial(origMat, phase, speed, amp) {
-  // Просто возвращаем оригинальный материал — визуально качание через rotation
-  return origMat;
+  return origMat; // совместимость
 }
 
-// Применяет wobble к объекту — сохраняет базовое вращение и параметры качания
+// Создаёт pivot-группу для верхней части объекта (выше yThreshold в world-space)
+// и регистрирует её для анимации качания
 function applyWobble(obj, opts) {
-  const { phase, speed, amp } = opts;
-  // Сохраняем базовое вращение
-  const baseRotX = obj.rotation.x;
-  const baseRotZ = obj.rotation.z;
-  window._wobbleObjects.push({ obj, phase, speed, amp, baseRotX, baseRotZ });
+  const { phase, speed, amp, yThreshold } = opts;
+  // yThreshold — меши с центром bounding box выше этого значения будут качаться
+  // Для tile_tree: тайл ~0..0.2, крона ~0.3..1.0 → порог 0.25
+  const thresh = yThreshold !== undefined ? yThreshold : 0.25;
+
+  // Собираем все дочерние меши выше порога
+  const topMeshes = [];
+  obj.traverse(m => {
+    if (!m.isMesh) return;
+    // Центр bounding box меша в local space
+    const b = new THREE.Box3().setFromObject(m);
+    const cy = (b.min.y + b.max.y) / 2;
+    if (cy > thresh) topMeshes.push(m);
+  });
+
+  if (topMeshes.length === 0) {
+    // Нет мешей выше порога — качаем весь объект (для пальм и декораций)
+    const baseRotX = obj.rotation.x;
+    const baseRotZ = obj.rotation.z;
+    window._wobbleObjects.push({ obj, pivot: null, phase, speed, amp, baseRotX, baseRotZ,
+      basePos: { x: obj.position.x, y: obj.position.y, z: obj.position.z } });
+    return;
+  }
+
+  // Создаём pivot-группу. Её позиция — основание кроны (нижний край топ-мешей)
+  let pivotY = Infinity;
+  topMeshes.forEach(m => {
+    const b = new THREE.Box3().setFromObject(m);
+    pivotY = Math.min(pivotY, b.min.y);
+  });
+
+  const pivot = new THREE.Group();
+  pivot.position.set(obj.position.x, pivotY, obj.position.z);
+
+  // Перемещаем топ-меши в pivot (сохраняем их world-позицию)
+  topMeshes.forEach(m => {
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    const worldScale = new THREE.Vector3();
+    m.matrixWorld.decompose(worldPos, worldQuat, worldScale);
+
+    // Убираем из старого родителя
+    if (m.parent) m.parent.remove(m);
+
+    // Позиция относительно pivot
+    m.position.set(
+      worldPos.x - pivot.position.x,
+      worldPos.y - pivot.position.y,
+      worldPos.z - pivot.position.z
+    );
+    m.quaternion.copy(worldQuat);
+    m.scale.copy(worldScale);
+    pivot.add(m);
+  });
+
+  obj.parent ? obj.parent.add(pivot) : scene.add(pivot);
+
+  window._wobbleObjects.push({
+    obj: null, pivot,
+    phase, speed, amp,
+    baseRotX: 0, baseRotZ: 0,
+    basePos: { x: pivot.position.x, y: pivot.position.y, z: pivot.position.z }
+  });
 }
 
 // Обновляет качание всех объектов
@@ -2986,9 +3045,13 @@ function updateWobble(dt) {
   window._wobbleTime += dt;
   const t = window._wobbleTime;
   for (const item of window._wobbleObjects) {
-    if (!item.obj || !item.obj.parent) continue; // объект удалён из сцены
-    item.obj.rotation.x = item.baseRotX + Math.sin(t * item.speed + item.phase) * item.amp;
-    item.obj.rotation.z = item.baseRotZ + Math.sin(t * item.speed * 0.7 + item.phase + 1.3) * item.amp * 0.6;
+    const target = item.pivot || item.obj;
+    if (!target || !target.parent) continue;
+
+    const rx = Math.sin(t * item.speed + item.phase) * item.amp;
+    const rz = Math.sin(t * item.speed * 0.7 + item.phase + 1.3) * item.amp * 0.6;
+    target.rotation.x = item.baseRotX + rx;
+    target.rotation.z = item.baseRotZ + rz;
   }
 }
 // ══════════════════════════════════════════════════════════════════
@@ -3970,9 +4033,11 @@ function startGame(mapGrid, customCellData, freeObjsData) {
         'snow_tile_tree','snow_tile_tree_double'];
       if (_palmTreeKeys.includes(fo.modelKey)) {
         const _fp = Math.random() * Math.PI * 2;
-        const _fs = 1.0 + Math.random() * 1.2;  // было 0.5+0.6
-        const _fa = 0.07 + Math.random() * 0.08; // было 0.05+0.05
-        applyWobble(obj, { phase: _fp, speed: _fs, amp: _fa });
+        const _fs = 1.0 + Math.random() * 1.2;
+        const _fa = 0.07 + Math.random() * 0.08;
+        // tile_tree — качаем крону; пальмы — весь ствол
+        const isTileTree = fo.modelKey.startsWith('tile_tree') || fo.modelKey.startsWith('snow_tile_tree');
+        applyWobble(obj, { phase: _fp, speed: _fs, amp: _fa, yThreshold: isTileTree ? 0.25 : -99 });
       }
     });
     buildReflection(); // перестроим отражение с учётом freeObjs
