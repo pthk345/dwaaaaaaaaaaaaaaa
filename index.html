@@ -623,30 +623,31 @@ function _applyWobble(mat) {
   if (!mat || mat._wobble) return;
   mat._wobble = true;
 
+  // Force unique shader program — prevents Three.js shader cache from reusing
+  // a compiled program that doesn't have our wobble code injected
+  mat.customProgramCacheKey = function() { return 'wobble'; };
+
   mat.onBeforeCompile = function(shader) {
     shader.uniforms.uWT = _WOBBLE_TIME;
+    // Prepend uniform declaration
     shader.vertexShader = 'uniform float uWT;\n' + shader.vertexShader;
+    // Inject bend code right after #include <begin_vertex>
+    // 'transformed' is defined there — we modify it in-place
+    var inject = [
+      '',
+      '// === VEGETATION BEND ===',
+      '{',
+      '  vec4 _wp = modelMatrix * vec4(position, 1.0);',
+      '  float _ph = fract(sin(dot(_wp.xz, vec2(127.1,311.7))) * 43758.5453);',
+      '  float _yn = clamp(position.y * 0.6, 0.0, 1.0);',
+      '  float _mask = _yn * _yn;',
+      '  transformed.x += sin(uWT * 0.9 + _ph * 6.283) * 0.10 * _mask;',
+      '  transformed.z += sin(uWT * 0.61 + _ph * 4.712 + 1.57) * 0.06 * _mask;',
+      '}'
+    ].join('\n');
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
-      [
-        '#include <begin_vertex>',
-        '{',
-        // Unique phase per tree from world position hash
-        '  vec4 _wp = modelMatrix * vec4(position, 1.0);',
-        '  float _ph = fract(sin(dot(_wp.xz, vec2(127.1,311.7))) * 43758.5453);',
-        // Normalized height: clamp 0..1, then apply power curve
-        // so base = 0, crown = 1, mid = ~0.35 (soft start)
-        '  float _yn = clamp(position.y * 0.55, 0.0, 1.0);',
-        '  float _mask = _yn * _yn * _yn;',   // cubic: base locked, gradual rise
-        // Primary bend: slow, medium amplitude
-        '  float _b1 = sin(uWT * 0.9 + _ph * 6.2832) * 0.07;',
-        // Secondary bend: slightly faster, perpendicular, smaller
-        '  float _b2 = sin(uWT * 0.61 + _ph * 4.712) * 0.04;',
-        // Apply: pure lateral displacement proportional to height
-        '  transformed.x += _b1 * _mask;',
-        '  transformed.z += _b2 * _mask;',
-        '}'
-      ].join('\n')
+      '#include <begin_vertex>' + inject
     );
   };
   mat.needsUpdate = true;
