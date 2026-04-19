@@ -28,7 +28,7 @@ font-family:‘Nunito’,‘SF Pro Rounded’,system-ui,sans-serif;
 color:#fff;
 touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.92);}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -1071,6 +1071,12 @@ function initThree() {
   // Небо загружается ниже через TextureLoader
   scene.background = new THREE.Color(0x87ceeb); // временный голубой
 
+  // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
+  // density 0.018: ближние тайлы чёткие, горизонт тает
+  // Цвет совпадает с небом → плавный переход
+  scene.fog = new THREE.FogExp2(0xb8d4e8, 0.018);
+  window._gameFog = scene.fog;
+
   // ══ НЕБО ══════════════════════════════════
   // Equirectangular панорама. Облака в верхней четверти текстуры.
   // Используем SphereGeometry как скайдом — даёт полный контроль над позицией.
@@ -1102,63 +1108,61 @@ function initThree() {
   // ══ ОСВЕЩЕНИЕ — красивый картунный стиль ══════════════════════
 
   // Tone mapping: ACESFilmic даёт приятный контраст и насыщенность
-  // ── Soft overcast cozy lighting ─────────────────────────────
-  // Цель: как референс — тени есть, но мягкие, тёплые цвета, без жёсткости
-
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.92; // чуть светлее чем дефолт 0.85
+  renderer.toneMappingExposure = 0.85; // -30% от 1.15
 
-  // 1. Hemisphere — overcast небо. Умеренный, не заливает всё белым.
-  //    Sky: тёплый кремово-персиковый (как на референсе)
-  //    Ground: мягкий зелёный bounce
+  // 1. Hemisphere light — небо сверху (тёплый голубой) + земля снизу (тёплый зелёный)
   const hemiLight = new THREE.HemisphereLight(
-    0xf2dfc8,  // skyColor: персиково-кремовый
-    0x9dc87a,  // groundColor: мягкий зелёный
-    0.75       // умеренно — даёт цвет без уничтожения теней
+    0xc8e8ff,  // skyColor: нежный голубой
+    0x8fc870,  // groundColor: травяной зелёный
+    0.52       // -30% от 0.75
   );
   hemiLight.userData.persistent = true;
   scene.add(hemiLight);
 
-  // 2. Главный свет — достаточно сильный чтобы давать видимые мягкие тени
-  //    Не слишком жёсткий, не слишком слабый
-  const sunLight = new THREE.DirectionalLight(0xfff0dc, 1.1);
-  sunLight.position.set(-8, 18, 10);
+  // 2. Главный солнечный свет — тени рисует только он
+  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55);
+  sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
+  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
   sunLight.shadow.mapSize.width  = 4096;
   sunLight.shadow.mapSize.height = 4096;
-  sunLight.shadow.camera.near   =  1;
-  sunLight.shadow.camera.far    =  80;
-  sunLight.shadow.camera.left   = -22;
-  sunLight.shadow.camera.right  =  22;
-  sunLight.shadow.camera.top    =  22;
-  sunLight.shadow.camera.bottom = -22;
+  sunLight.shadow.camera.near = 0.5;
+  sunLight.shadow.camera.far  = 80;
+  // Охватываем весь остров 20x20 тайлов
+  sunLight.shadow.camera.left   = -25;
+  sunLight.shadow.camera.right  =  25;
+  sunLight.shadow.camera.top    =  25;
+  sunLight.shadow.camera.bottom = -25;
 
-  // Ключ к мягким теням без акне: bias чуть отрицательнее, normalBias выше
-  sunLight.shadow.bias       = -0.0002;
-  sunLight.shadow.normalBias =  0.04;
-  sunLight.shadow.radius     =  6;   // мягкие края, но тень читается
+  // Ключевые параметры мягких теней без полос:
+  // bias: небольшой отрицательный убирает shadow acne
+  // normalBias: компенсирует артефакты на наклонных поверхностях
+  // radius: размытие PCF — чем больше тем мягче тень
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
 
-  // 3. Cool fill сзади — убирает чёрные пятна, не убивает тени
-  const rimLight = new THREE.DirectionalLight(0xc8ddf5, 0.28);
-  rimLight.position.set(12, 10, -12);
+  // 3. Контровой свет (rim) — холодный голубоватый сзади-справа
+  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.38); // -30%
+  rimLight.position.set(14, 10, -12);
   rimLight.userData.persistent = true;
   scene.add(rimLight);
 
-  // 4. Тёплый fill спереди — поднимает тени до уровня референса
-  const fillLight = new THREE.DirectionalLight(0xffe4c0, 0.22);
-  fillLight.position.set(4, 6, 18);
+  // 4. Заполняющий свет спереди — поднимает тёмные грани
+  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.28); // -30%
+  fillLight.position.set(5, 6, 18);
   fillLight.userData.persistent = true;
   scene.add(fillLight);
 
-  // 5. Ambient — минимальный, только чтобы абсолютно чёрного не было
-  const ambLight = new THREE.AmbientLight(0xfff4ec, 0.18);
+  // 5. Минимальный ambient
+  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.13); // -30%
   ambLight.userData.persistent = true;
   scene.add(ambLight);
-  // ─────────────────────────────────────────────────────────────
 
   // ══════════════════════════════════════════════════════════════
 
@@ -2070,6 +2074,7 @@ function buildEditorEmptyMap() {
   clearScene();
   // Серый фон для редактора (после clearScene который его не трогает)
   scene.background = new THREE.Color(0x39393b);
+  scene.fog = null; // в редакторе туман не нужен
   renderer.setClearColor(0x39393b, 1);
   // Показываем шахматный пол, прячем игровые объекты
   if (window._editorFloor) window._editorFloor.visible = true;
@@ -2110,6 +2115,7 @@ function closeEditor() {
   // ── Восстанавливаем небо/океан при выходе из редактора ──
   if (window._skyTex) {
     scene.background = window._skyTex;
+    scene.fog = window._gameFog || new THREE.FogExp2(0xb8d4e8, 0.018);
   } else {
     scene.background = new THREE.Color(0x87ceeb);
   }
