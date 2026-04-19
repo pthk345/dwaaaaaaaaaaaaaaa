@@ -962,13 +962,28 @@ const ENEMY_DEFS = [
   { id:'fatguy', name:'Fat Guy', icon:'🐷', hp:200, speed:0.8, reward:20, color:0xffaaaa, scale:0.5, modelKey:'enemy_ufo_c' },
   { id:'police', name:'Police', icon:'👮', hp:150, speed:1.8, reward:25, color:0x4444ff, scale:0.4, modelKey:'enemy_ufo_a' },
   { id:'engineer', name:'Engineer', icon:'🔧', hp:120, speed:2, reward:30, color:0x44ff44, scale:0.4, modelKey:'enemy_ufo_b' },
-  { id:'boss', name:'BOSS', icon:'👹', hp:1000, speed:0.8, reward:100, color:0xff0000, scale:0.7, modelKey:'enemy_ufo_d' },
+  { id:'boss',     name:'BOSS',     icon:'👹', hp:1000,  speed:0.8, reward:100, color:0xff0000, scale:0.7, modelKey:'enemy_ufo_d' },
+  { id:'berdyeva', name:'BERDYEVA', icon:'💀', hp:12000, speed:0.5, reward:500, color:0x8800ff, scale:1.2, modelKey:'berdyeva',
+    isFinalBoss: true, desc:'Финальный босс. Очень высокие HP, сопровождается миньонами.' },
 ];
 
 // ============================================================
 // WAVE DEFINITIONS
 // ============================================================
 function buildWave(waveNum) {
+  // Волна 20 — финальный босс Berdyeva
+  if (waveNum === 20) {
+    const hpMult = 1 + (waveNum - 1) * 0.5;
+    const spawnInterval = 0.4;
+    const enemies = [];
+    // Сначала армия сопровождения
+    for (let i = 0; i < 8; i++) enemies.push({ type:'engineer', hpMult: hpMult * 1.5 });
+    for (let i = 0; i < 6; i++) enemies.push({ type:'police',   hpMult: hpMult * 1.5 });
+    for (let i = 0; i < 4; i++) enemies.push({ type:'boss',     hpMult: hpMult });
+    // Главная Berdyeva последней — самая мощная
+    enemies.push({ type:'berdyeva', hpMult: 1.0 });
+    return { enemies, spawnInterval, num: waveNum };
+  }
   const enemies = [];
   const isBossWave = waveNum % 5 === 0;
   const count = 5 + waveNum * 3;
@@ -1190,6 +1205,116 @@ function initThree() {
     window._foamT = 0;
     if (!_persistentObjects.includes(foamMesh)) _persistentObjects.push(foamMesh);
   });
+
+  // ── Кувшинки на воде: спавним после загрузки ассетов ─────
+  // Откладываем чтобы ассеты успели загрузиться
+  window._lilypadMeshes = [];
+  window._spawnLilypads = function() {
+    if (!assets) return;
+    // Убираем старые
+    window._lilypadMeshes.forEach(m => { if(m.parent) m.parent.remove(m); });
+    window._lilypadMeshes = [];
+
+    const WATER_Y_LIL = _MIRROR_Y + 0.04; // чуть выше воды, видны хорошо
+    const keys = ['lilywater','lilywater','lilywater','lilywaterbig','lilywaterbig'];
+    const COUNT = 18; // не много не мало
+
+    // Псевдорандом для воспроизводимого расположения
+    let seed = 42;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff; };
+
+    for (let i = 0; i < COUNT; i++) {
+      const key = keys[Math.floor(rand() * keys.length)];
+      const model = assets.clone(key);
+      if (!model) continue;
+
+      // Масштаб: разнообразный, ~0.25–0.45
+      const sc = 0.25 + rand() * 0.20;
+      model.scale.set(sc, sc, sc);
+
+      // Позиция: по всей плоскости воды (ocean plane)
+      // Размещаем вокруг острова — за его пределами
+      const ISLAND_R = (GRID_W * TILE_SIZE) * 0.6; // радиус острова
+      const OCEAN_R  = ISLAND_R * 2.8;
+      let px, pz;
+      // Выбираем позицию вне острова
+      do {
+        px = (rand() - 0.5) * OCEAN_R * 2;
+        pz = (rand() - 0.5) * OCEAN_R * 2;
+      } while (Math.sqrt(px*px + pz*pz) < ISLAND_R * 0.7);
+
+      model.position.set(
+        (GRID_W-1)/2*TILE_SIZE + px,
+        WATER_Y_LIL,
+        (GRID_H-1)/2*TILE_SIZE + pz
+      );
+
+      // Случайный угол поворота
+      model.rotation.y = rand() * Math.PI * 2;
+
+      // Уникальная фаза качания для каждой кувшинки
+      model.userData.lilyT     = rand() * Math.PI * 2;
+      model.userData.lilyPhaseX = rand() * Math.PI * 2;
+      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
+      model.userData.lilySpeed  = 0.4 + rand() * 0.5;  // разная скорость
+      model.userData.lilyAmpX   = 0.03 + rand() * 0.04; // амплитуда наклона
+      model.userData.lilyAmpZ   = 0.03 + rand() * 0.04;
+      model.userData.lilyDriftX = (rand() - 0.5) * 0.0008; // медленный дрейф
+      model.userData.lilyDriftZ = (rand() - 0.5) * 0.0008;
+      model.userData.baseY      = WATER_Y_LIL;
+      model.userData.isLilypad  = true;
+      model.userData.persistent = true;
+      model.traverse(m=>{ if(m.isMesh){ m.castShadow=false; m.receiveShadow=false; } });
+
+      scene.add(model);
+      window._lilypadMeshes.push(model);
+      if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
+    }
+
+    // Камыши: по берегам
+    const REED_KEYS  = ['kamish','kamishi','kamish','kamishi'];
+    const REED_COUNT = 12;
+    for (let i = 0; i < REED_COUNT; i++) {
+      const key  = REED_KEYS[Math.floor(rand() * REED_KEYS.length)];
+      const model = assets.clone(key);
+      if (!model) continue;
+
+      const sc = 0.35 + rand() * 0.25;
+      model.scale.set(sc, sc, sc);
+
+      // Камыши чуть ближе к берегу
+      const angle = rand() * Math.PI * 2;
+      const dist  = ISLAND_R * (0.85 + rand() * 0.5);
+      const px2   = Math.cos(angle) * dist;
+      const pz2   = Math.sin(angle) * dist;
+
+      model.position.set(
+        (GRID_W-1)/2*TILE_SIZE + px2,
+        WATER_Y_LIL - 0.01,
+        (GRID_H-1)/2*TILE_SIZE + pz2
+      );
+      model.rotation.y = rand() * Math.PI * 2;
+
+      model.userData.lilyT      = rand() * Math.PI * 2;
+      model.userData.lilySpeed  = 0.3 + rand() * 0.3;
+      model.userData.lilyAmpX   = 0.015 + rand() * 0.02; // камыши качаются меньше
+      model.userData.lilyAmpZ   = 0.015 + rand() * 0.02;
+      model.userData.lilyPhaseX = rand() * Math.PI * 2;
+      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
+      model.userData.lilyDriftX = 0;
+      model.userData.lilyDriftZ = 0;
+      model.userData.baseY      = WATER_Y_LIL - 0.01;
+      model.userData.isLilypad  = true;
+      model.userData.persistent = true;
+      model.traverse(m=>{ if(m.isMesh){ m.castShadow=false; m.receiveShadow=false; } });
+
+      scene.add(model);
+      window._lilypadMeshes.push(model);
+      if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
+    }
+  };
+  // Спавним после небольшой задержки (ждём загрузки ассетов)
+  setTimeout(() => window._spawnLilypads && window._spawnLilypads(), 2500);
   // ─────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────
 
@@ -1470,6 +1595,10 @@ const ED_PALETTE = [
   { type:TILE_START, modelKey:'snow_tile_spawn_round', label:'С.Старт',    icon:'🔵', cat:'❄️ Снег' },
   { type:TILE_END,   modelKey:'snow_tile_end_round',   label:'С.Финиш',    icon:'🔴', cat:'❄️ Снег' },
   // === ВОДА ===
+  { type:TILE_WATER,  modelKey:'lilywater',           label:'Кувшинка',   icon:'🌸', cat:'💧 Вода' },
+  { type:TILE_WATER,  modelKey:'lilywaterbig',         label:'Б.Кувшинка',  icon:'🌸', cat:'💧 Вода' },
+  { type:TILE_WATER,  modelKey:'kamish',               label:'Камыш',       icon:'🌾', cat:'💧 Вода' },
+  { type:TILE_WATER,  modelKey:'kamishi',              label:'Камыши',      icon:'🌾', cat:'💧 Вода' },
   { type:TILE_WATER,  modelKey:'tile_river_straight',  label:'Река',       icon:'🌊', cat:'💧 Вода' },
   { type:TILE_WATER,  modelKey:'tile_river_corner',    label:'Р.Поворот',  icon:'〰', cat:'💧 Вода' },
   { type:TILE_WATER,  modelKey:'tile_river_transition',label:'Р.Переход',  icon:'💧', cat:'💧 Вода' },
@@ -2805,6 +2934,24 @@ function gameLoop(ts) {
     );
   }
 
+  // ── Анимация кувшинок и камышей ───────────────────────────
+  if (window._lilypadMeshes && window._lilypadMeshes.length > 0) {
+    const realDt = Math.min((ts - lastTime) / 1000, 0.1); // без gameSpeed — на воде независимо
+    for (const m of window._lilypadMeshes) {
+      if (!m.userData.isLilypad) continue;
+      m.userData.lilyT += realDt * m.userData.lilySpeed;
+      const t = m.userData.lilyT;
+      // Качание: плавный синус по X и Z
+      m.rotation.x = Math.sin(t + m.userData.lilyPhaseX) * m.userData.lilyAmpX;
+      m.rotation.z = Math.cos(t * 0.7 + m.userData.lilyPhaseZ) * m.userData.lilyAmpZ;
+      // Лёгкое покачивание по Y (волны)
+      m.position.y = m.userData.baseY + Math.sin(t * 1.1 + m.userData.lilyPhaseX) * 0.012;
+      // Медленный дрейф по течению
+      m.position.x += m.userData.lilyDriftX;
+      m.position.z += m.userData.lilyDriftZ;
+    }
+  }
+
 
   if (gameState !== 'playing') {
     renderer.render(scene, camera);
@@ -2832,9 +2979,18 @@ function updateEnemies(dt) {
     // Левитация: плавное покачивание вверх-вниз
     enemy.model.position.y = enemy.baseY + Math.sin(t * 2.1) * 0.08;
     // Вращение: медленно крутится + лёгкий наклон
-    enemy.model.rotation.y += dt * 1.8;
-    enemy.model.rotation.z = Math.sin(t * 1.3) * 0.12;
-    enemy.model.rotation.x = Math.cos(t * 0.9) * 0.06;
+    if (enemy.def.isFinalBoss) {
+      // Berdyeva: медленное вращение, тяжёлая поступь
+      enemy.model.rotation.y += dt * 0.8;
+      enemy.model.rotation.z = Math.sin(t * 0.6) * 0.06;
+      enemy.model.rotation.x = Math.cos(t * 0.4) * 0.04;
+      // Более выраженная левитация
+      enemy.model.position.y = enemy.baseY + Math.sin(t * 1.0) * 0.18;
+    } else {
+      enemy.model.rotation.y += dt * 1.8;
+      enemy.model.rotation.z = Math.sin(t * 1.3) * 0.12;
+      enemy.model.rotation.x = Math.cos(t * 0.9) * 0.06;
+    }
     
     if (enemy.stunTimer > 0) { enemy.stunTimer -= dt; continue; }
     
@@ -3200,8 +3356,13 @@ function startWave() {
   
   document.getElementById('btn-start-wave').classList.remove('primary');
   
+  const isFinalBoss = wave === 20;
   const isBoss = wave % 5 === 0;
-  showWaveNotify(`Wave ${wave}${isBoss ? ' 👹 BOSS' : ''}!`, isBoss ? 'Boss incoming!' : 'Defend your base!');
+  if (isFinalBoss) {
+    showWaveNotify('☠ ВОЛНА 20 — BERDYEVA! ☠', 'Финальный босс пришёл! Удержи базу!');
+  } else {
+    showWaveNotify(`Волна ${wave}${isBoss ? ' 👹 BOSS' : ''}!`, isBoss ? 'Босс идёт!' : 'Защищай базу!');
+  }
   
   updateHUD();
 }
@@ -4073,6 +4234,12 @@ async function main() {
     pirate_tower_watch: 'assets/pirate/tower-watch.glb',
     pirate_tower_complete_large: 'assets/pirate/tower-complete-large.glb',
     pirate_tower_complete_small: 'assets/pirate/tower-complete-small.glb',
+    // === MY ASSETS ===
+    lilywater:      'assets/myassets/lilywater.glb',
+    lilywaterbig:   'assets/myassets/lilywaterbig.glb',
+    kamish:         'assets/myassets/kamish.glb',
+    kamishi:        'assets/myassets/kamishi.glb',
+    berdyeva:       'assets/myassets/berdyeva.glb',
   });
   
   updateProgress(90, 'Building scene...');
