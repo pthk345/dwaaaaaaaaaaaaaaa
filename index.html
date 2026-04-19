@@ -1289,11 +1289,11 @@ function initThree() {
     uCellSpeed:     { value: 0.18 },
     uFlowX:         { value: 0.012 },
     uFlowZ:         { value: -0.05 },
-    uEdgeThreshold: { value: 0.05 },   // тоньше края
-    uEdgeSoftness:  { value: 0.025 },  // резче, почти белые
-    uDeepColor:     { value: new THREE.Color(0x8ad8f0) },   // светлее, менее насыщено
-    uMidColor:      { value: new THREE.Color(0xb8eaf8) },   // ещё светлее
-    uHighlight:     { value: new THREE.Color(0xf0fbff) },   // почти белый
+    uEdgeThreshold: { value: 0.12 },   // толще края
+    uEdgeSoftness:  { value: 0.06 },   // мягче — белая полоса шире
+    uDeepColor:     { value: new THREE.Color(0xb8cad9) },   // #b8cad9 — ненасыщенный
+    uMidColor:      { value: new THREE.Color(0xc8d8e6) },   // чуть светлее
+    uHighlight:     { value: new THREE.Color(0xffffff) },   // белый для краёв
     uFadeDistance:  { value: 220.0 },
     uFadeStrength:  { value: 2.0 },
     uCamXZ:         { value: new THREE.Vector2() },
@@ -1329,7 +1329,7 @@ function initThree() {
     window._lilypadMeshes.forEach(m => { if(m.parent) m.parent.remove(m); });
     window._lilypadMeshes = [];
 
-    const WATER_Y_LIL = _MIRROR_Y - 0.01;  // в воде, не над ней
+    const WATER_Y_LIL = _MIRROR_Y - 0.06;  // глубже в воде — кувшинки полупогружены
 
     // Псевдорандом (воспроизводимый)
     let seed = 137;
@@ -1401,8 +1401,8 @@ function initThree() {
       model.userData.persistent = true;
       model.traverse(m => {
         if (m.isMesh) {
-          m.castShadow    = false;
-          m.receiveShadow = false;
+          m.castShadow    = true;   // тени от кувшинок
+          m.receiveShadow = true;
           m.renderOrder   = 7;
         }
       });
@@ -1421,7 +1421,7 @@ function initThree() {
         const shadowDisc = new THREE.Mesh(shadowGeo, shadowMat);
         shadowDisc.rotation.x = -Math.PI / 2;
         // Чуть ниже кувшинки чтобы не z-fight
-        shadowDisc.position.set(CX + px, WATER_Y_LIL - 0.005, CZ + pz);
+        shadowDisc.position.set(CX + px, WATER_Y_LIL + 0.02, CZ + pz);
         shadowDisc.renderOrder = 6;
         shadowDisc.userData.isLilyShadow = true;
         shadowDisc.userData.persistent   = true;
