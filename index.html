@@ -622,25 +622,27 @@ function _applyWobble(mat) {
     // Inject uWobbleTime declaration into vertex shader
     shader.vertexShader = 'uniform float uWobbleTime;\n' + shader.vertexShader;
 
-    // Inject sway after #include <begin_vertex> (where 'transformed' is defined)
+    // Lean sway: position.y is the lever arm for rotation around base.
+    // lean angle * position.y = vertex displacement (small-angle approximation).
+    // Grass at y≈0 → zero movement. Crown at y≈1.5 → max lean.
+    // Two detuned frequencies for organic feel. NO X+Z combo = no twisting.
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
 {
-  // World XZ position → unique phase per tree (no synchronisation)
+  // World XZ → unique random phase per tree, no two trees sync
   vec4 _wpos = modelMatrix * vec4(position, 1.0);
   float _ph = fract(sin(dot(_wpos.xz, vec2(127.1, 311.7))) * 43758.5453);
 
-  // Height mask: y < 0.22 = grass base → zero sway.
-  // Above that, sway grows quadratically → crown swings, trunk barely moves.
-  float _h  = max(0.0, position.y - 0.22);
-  float _sw = _h * _h * 0.18;   // 0 at base → gentle at mid → max at crown
+  // Primary sway: lean along X axis (main wind direction)
+  float _leanX = sin(uWobbleTime * 1.2 + _ph * 6.2832) * 0.055;
+  // Secondary: perpendicular lean, slower, smaller → slight diagonal bob
+  float _leanZ = sin(uWobbleTime * 0.71 + _ph * 3.927) * 0.028;
 
-  // Two slightly detuned frequencies → natural organic feel
-  float _t1 = uWobbleTime * 1.1  + _ph * 6.2832;
-  float _t2 = uWobbleTime * 0.73 + _ph * 4.1888;
-  transformed.x += sin(_t1) * _sw;
-  transformed.z += cos(_t2) * _sw * 0.75;
+  // Displacement = lean_angle * height (pendulum geometry)
+  // position.y naturally = 0 at grass base → no base movement
+  transformed.x += position.y * _leanX;
+  transformed.z += position.y * _leanZ;
 }
 `
     );
@@ -650,6 +652,21 @@ function _applyWobble(mat) {
 
 // Apply wobble to every mesh inside a vegetation object,
 // cloning materials first so grass tiles sharing the same mat are unaffected.
+
+// Keys that should get wind wobble animation
+function _isVegetation(key) {
+  return key && (
+    key.includes('tree')   ||
+    key.includes('crystal')||
+    key.includes('reed')   ||
+    key.includes('bush')   ||
+    key.includes('bamboo') ||
+    key.includes('flower') ||
+    key.includes('palm')   ||
+    key.includes('detail_') // all detail decorations: trees, crystals, rocks
+  );
+}
+
 function _addWobble(obj) {
   obj.traverse(function(child) {
     if (!child.isMesh) return;
@@ -1545,8 +1562,8 @@ function buildMap(g, customCellData) {
     obj.position.set(c*TILE_SIZE,0,r*TILE_SIZE);
     obj.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     obj.userData={type:'tile',row:r,col:c,tileType:tt};
-    // Apply wobble to vegetation tiles
-    if (tt === TILE_TREE) { _addWobble(obj); }
+    // Apply wobble to vegetation tiles (also snow variants)
+    if (tt === TILE_TREE || _isVegetation(key)) { _addWobble(obj); }
     addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
 
     // TILE_ZONE: добавляем selection-a (4 жёлтых угла) поверх тайла
@@ -1588,10 +1605,8 @@ function buildMap(g, customCellData) {
     const ox=((h%7)-3)*0.06,oz=((h%5)-2)*0.06;
     det.position.set(c*TILE_SIZE+ox,0,r*TILE_SIZE+oz);
     det.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
-    // Decoration trees and bushes get wobble
-    if (mk.includes('tree') || mk.includes('crystal') || mk.includes('detail')) {
-      _addWobble(det);
-    }
+    // Decoration vegetation gets wobble
+    if (_isVegetation(mk)) { _addWobble(det); }
     addToScene(det); tileObjects.push(det);
   }
   } // end !isEditorMap
@@ -3925,6 +3940,8 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       if (fo.rot) obj.rotation.set(fo.rot.x, fo.rot.y, fo.rot.z);
       obj.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       obj.userData = { freeObj: true, modelKey: fo.modelKey };
+      // Vegetation placed freely also gets wobble
+      if (_isVegetation(fo.modelKey)) _addWobble(obj);
       scene.add(obj);
       tileObjects.push(obj); // чтобы попало в отражение
     });
