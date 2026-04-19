@@ -371,7 +371,7 @@ box-shadow:0 6px 0 #000;
 
 <!-- Main Menu -->
 
-<div id="main-menu" class="screen hidden" style="position:relative;">
+<div id="main-menu" class="screen hidden">
   <button id="btn-music-menu" title="Music on/off">
     <img id="btn-music-menu-icon" src="assets/icons/ic_music_on.png">
   </button>
@@ -432,7 +432,7 @@ box-shadow:0 6px 0 #000;
     <button id="btn-music">
       <img id="btn-music-icon" src="assets/icons/ic_music_on.png">
     </button>
-    <button id="btn-speed">1x</button>
+    <button id="btn-speed"><span id="speed-txt">1x</span></button>
   </div>
 
   <div id="wave-info" style="display:none">Ready</div>
@@ -1012,6 +1012,7 @@ let THREE_loaded = false;
 let assets = null;
 let renderer, scene, camera, raycaster;
 let _reflGroup = null;  // Клон карты — отражение
+let _persistentObjects = []; // объекты которые не удаляются при clearScene (вода, кувшинки)
 let gameState = 'menu';
 let animFrameId = null;
 
@@ -1232,39 +1233,55 @@ function initThree() {
     const CX = (GRID_W-1)/2*TILE_SIZE;
     const CZ = (GRID_H-1)/2*TILE_SIZE;
 
-    // ── Кувшинки: 22 штуки, размер 0.5–0.9 units ─────────
-    const LILY_KEYS = ['lilywater','lilywater','lilywater','lilywaterbig','lilywaterbig'];
-    for (let i = 0; i < 22; i++) {
-      const key = LILY_KEYS[Math.floor(rand() * LILY_KEYS.length)];
+    // ── Кувшинки: 17-19 штук, два вида: одиночная + большая ─────
+    // ВАЖНО: сначала scene.add(), потом scaleToWorld() — иначе Box3 пустой!
+    const LILY_COUNT = 17 + Math.floor(rand() * 3); // 17, 18 или 19
+    for (let i = 0; i < LILY_COUNT; i++) {
+      // Два вида: lilywaterbig (большая) ≈ каждая третья
+      const isBig = (i % 3 === 2) || rand() < 0.30;
+      const key = isBig ? 'lilywaterbig' : 'lilywater';
+
       const model = assets.clone(key);
       if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); rand(); continue; }
 
-      // Размер: кувшинки ~0.5-0.9 units в мире
-      const worldSz = 0.5 + rand() * 0.4;
+      // Сначала добавляем в сцену — без этого Box3.setFromObject даёт пустой бокс
+      scene.add(model);
+      model.updateMatrixWorld(true); // принудительно обновляем матрицу до scaleToWorld
+
+      // Теперь масштабируем — Box3 работает корректно
+      const worldSz = isBig ? (0.75 + rand() * 0.55) : (1.00 + rand() * 0.95);
       scaleToWorld(model, worldSz);
 
-      // Позиция за пределами острова
-      let px, pz, attempts = 0;
-      do {
-        const angle = rand() * Math.PI * 2;
-        const dist  = ISLAND_R * (1.1 + rand() * 2.5);
-        px = Math.cos(angle) * dist;
-        pz = Math.sin(angle) * dist;
-        attempts++;
-      } while (Math.abs(px) > OCEAN_R || Math.abs(pz) > OCEAN_R && attempts < 20);
+      // Позиция: хаотично вокруг острова, часть близко, часть дальше
+      const angle = rand() * Math.PI * 2;
+      const tD = rand();
+      const dist  = ISLAND_R * (1.05 + tD * tD * 2.0); // квадратичное — скопление у берега
+      const px = Math.cos(angle) * dist + (rand()-0.5) * ISLAND_R * 0.25;
+      const pz = Math.sin(angle) * dist + (rand()-0.5) * ISLAND_R * 0.25;
 
       model.position.set(CX + px, WATER_Y_LIL, CZ + pz);
       model.rotation.y = rand() * Math.PI * 2;
 
-      model.userData.lilyT      = rand() * Math.PI * 2;
-      model.userData.lilyPhaseX = rand() * Math.PI * 2;
-      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
-      model.userData.lilySpeed  = 0.35 + rand() * 0.45;
-      model.userData.lilyAmpX   = 0.04 + rand() * 0.05;
-      model.userData.lilyAmpZ   = 0.04 + rand() * 0.05;
-      model.userData.lilyDriftX = (rand() - 0.5) * 0.0006;
-      model.userData.lilyDriftZ = (rand() - 0.5) * 0.0006;
-      model.userData.baseY      = WATER_Y_LIL;
+      const spawnX = CX + px;
+      const spawnZ = CZ + pz;
+
+      model.userData.lilyT         = rand() * Math.PI * 2;
+      model.userData.lilyPhaseX    = rand() * Math.PI * 2;
+      model.userData.lilyPhaseZ    = rand() * Math.PI * 2;
+      model.userData.lilySpeed     = 0.8 + rand() * 1.2;    // умеренная скорость качания
+      model.userData.lilyAmpX      = 0.06 + rand() * 0.08;  // амплитуда наклона X
+      model.userData.lilyAmpZ      = 0.05 + rand() * 0.06;  // амплитуда наклона Z
+      model.userData.lilyRotSpeed  = (rand() - 0.5) * 0.018; // медленное вращение Y
+      // Течение: каждая кувшинка дрейфует в чуть разных направлениях
+      const currentAngle  = 0.35 + rand() * 0.55;
+      const currentSpeed  = 0.00010 + rand() * 0.00016;
+      model.userData.lilyDriftX  = Math.cos(currentAngle) * currentSpeed;
+      model.userData.lilyDriftZ  = Math.sin(currentAngle) * currentSpeed;
+      // Зацикливание: кувшинка уплыла далеко → возвращается
+      model.userData.spawnX   = spawnX;
+      model.userData.spawnZ   = spawnZ;
+      model.userData.maxDrift = ISLAND_R * 3.2;
+      model.userData.baseY    = WATER_Y_LIL;
       model.userData.isLilypad  = true;
       model.userData.persistent = true;
       model.traverse(m => {
@@ -1275,60 +1292,13 @@ function initThree() {
         }
       });
 
-      scene.add(model);
       window._lilypadMeshes.push(model);
       if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
     }
 
-    // ── Камыши: 14 штук у берегов, размер 0.6–1.0 units ──
-    const REED_KEYS = ['kamish','kamishi','kamish','kamishi'];
-    for (let i = 0; i < 14; i++) {
-      const key = REED_KEYS[Math.floor(rand() * REED_KEYS.length)];
-      const model = assets.clone(key);
-      if (!model) { rand(); rand(); rand(); rand(); rand(); rand(); continue; }
+    // ── Камыши убраны ──
 
-      // Камыши немного выше (они вертикальные)
-      const worldSz = 0.7 + rand() * 0.5;
-      scaleToWorld(model, worldSz);
-
-      const angle = rand() * Math.PI * 2;
-      const dist  = ISLAND_R * (1.05 + rand() * 0.8);
-      const px2   = Math.cos(angle) * dist;
-      const pz2   = Math.sin(angle) * dist;
-
-      model.position.set(CX + px2, WATER_Y_LIL, CZ + pz2);
-      model.rotation.y = rand() * Math.PI * 2;
-
-      model.userData.lilyT      = rand() * Math.PI * 2;
-      model.userData.lilySpeed  = 0.25 + rand() * 0.3;
-      model.userData.lilyAmpX   = 0.02 + rand() * 0.025;
-      model.userData.lilyAmpZ   = 0.02 + rand() * 0.025;
-      model.userData.lilyPhaseX = rand() * Math.PI * 2;
-      model.userData.lilyPhaseZ = rand() * Math.PI * 2;
-      model.userData.lilyDriftX = 0;
-      model.userData.lilyDriftZ = 0;
-      model.userData.baseY      = WATER_Y_LIL;
-      model.userData.isLilypad  = true;
-      model.userData.persistent = true;
-      model.traverse(m => {
-        if (m.isMesh) {
-          m.castShadow    = false;
-          m.receiveShadow = false;
-          m.renderOrder   = 7;
-        }
-      });
-
-      // Wobble для камышей — они гнутся сильнее чем деревья
-      const rPhase = Math.random() * Math.PI * 2;
-      const rSpeed = 0.5 + Math.random() * 0.6;
-      const rAmp   = 0.08 + Math.random() * 0.06;
-      applyWobble(model, { phase: rPhase, speed: rSpeed, amp: rAmp });
-
-      scene.add(model);
-      window._lilypadMeshes.push(model);
-      if (!_persistentObjects.includes(model)) _persistentObjects.push(model);
-    }
-  };
+  }; // конец _spawnLilypads
   // Спавним с задержкой после загрузки всех ассетов
   setTimeout(() => window._spawnLilypads && window._spawnLilypads(), 3000);
   // ─────────────────────────────────────────────────────────────
@@ -1396,6 +1366,8 @@ function scaleTo(obj,size) {
 // Rich decoration pool: trees, rocks, crystals, structures
 const DECO_POOL=[
   {k:'detail_tree',w:6},{k:'detail_tree',w:6},{k:'detail_tree_large',w:4},
+  {k:'pirate_palm_straight',w:2},{k:'pirate_palm_bend',w:2},
+  {k:'pirate_palm_detailed_straight',w:1},{k:'pirate_palm_detailed_bend',w:1},
   {k:'detail_rocks',w:3},{k:'detail_rocks_large',w:2},
   {k:'detail_crystal',w:2},{k:'detail_crystal_large',w:1},
   {k:'wood_structure_part',w:2},{k:'detail_dirt',w:3},
@@ -1414,12 +1386,22 @@ function addToScene(obj) {
 }
 
 function clearScene() {
-  // Удаляем всё кроме объектов с userData.persistent = true
+  // Удаляем всё кроме постоянных объектов (свет, вода, небо)
   const toRemove = scene.children.filter(o => !o.userData.persistent);
   toRemove.forEach(o => scene.remove(o));
-  // Отражение и оверлей
+
+  // Очищаем кувшинки из сцены (они persistent, но пересоздаются каждый раз)
+  if (window._lilypadMeshes) {
+    window._lilypadMeshes.forEach(m => { if (m.parent) m.parent.remove(m); });
+    window._lilypadMeshes = [];
+  }
+  // Убираем их из _persistentObjects тоже
+  _persistentObjects = _persistentObjects.filter(o => !o.userData.isLilypad);
+
+  // Сбрасываем список wobble-объектов — они пересоздадутся при buildMap
+  window._wobbleObjects = [];
+
   _reflGroup = null;
-  // НЕ трогаем scene.background — вызывающий код сам выставляет нужный фон
   _sceneObjects = [];
   tileObjects = [];
   tileMeshGrid = Array.from({length:GRID_H},()=>Array(GRID_W).fill(null));
@@ -1490,10 +1472,23 @@ function buildMap(g, customCellData) {
 
     // Wobble для деревьев: уникальная фаза на каждую клетку
     if (tt === TILE_TREE) {
-      const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2); // хаотичная фаза
-      const speed = 0.6 + ((r * 7 + c * 13) % 100) / 100 * 0.5; // 0.6–1.1 рад/с
-      const amp   = 0.055 + ((r * 3 + c * 17) % 100) / 100 * 0.04; // 0.055–0.095
-      applyWobble(obj, { phase, speed, amp });
+      try {
+        const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2);
+        const speed = 1.2 + ((r * 7 + c * 13) % 100) / 100 * 1.0;
+        const amp   = 0.08 + ((r * 3 + c * 17) % 100) / 100 * 0.06;
+        applyWobble(obj, { phase, speed, amp });
+      } catch(e) { console.warn('wobble tree error:', e); }
+    }
+
+    // Wobble для пальм (pirate kit) — та же анимация что у деревьев
+    const _PALM_KEYS = ['pirate_palm_bend','pirate_palm_straight','pirate_palm_detailed_bend','pirate_palm_detailed_straight'];
+    if (key && _PALM_KEYS.includes(key)) {
+      try {
+        const phase = (r * 3.14 + c * 2.72 + 0.5) % (Math.PI * 2);
+        const speed = 1.0 + ((r * 11 + c * 7) % 100) / 100 * 0.9;
+        const amp   = 0.09 + ((r * 5 + c * 19) % 100) / 100 * 0.07;
+        applyWobble(obj, { phase, speed, amp });
+      } catch(e) { console.warn('wobble palm error:', e); }
     }
 
     // TILE_ZONE: добавляем selection-a (4 жёлтых угла) поверх тайла
@@ -1537,12 +1532,12 @@ function buildMap(g, customCellData) {
     det.traverse(m=>{if(m.isMesh){m.castShadow=true;m.receiveShadow=true;}});
     addToScene(det); tileObjects.push(det);
     // Wobble для detail деревьев
-    {
+    try {
       const dp = (r*1.41+c*2.73+Math.random()) % (Math.PI*2);
-      const ds = 0.5 + Math.random()*0.5;
-      const da = 0.05 + Math.random()*0.04;
+      const ds = 1.0 + Math.random()*1.0;
+      const da = 0.07 + Math.random()*0.06;
       applyWobble(det, { phase:dp, speed:ds, amp:da });
-    }
+    } catch(e) { console.warn('wobble deco error:', e); }
   }
   } // end !isEditorMap
 
@@ -1896,6 +1891,11 @@ function openEditor() {
   buildEditorPalette();
   if(!scene) { initThree(); }
 
+  // Прячем кувшинки и камыши в редакторе — они не должны там быть
+  if (window._lilypadMeshes) {
+    window._lilypadMeshes.forEach(m => { if (m.parent) m.parent.remove(m); });
+  }
+
   // Прячем отражение
   if (_reflGroup) _reflGroup.visible = false;
 
@@ -1977,6 +1977,9 @@ function closeEditor() {
   if (window._foamMesh)  window._foamMesh.visible  = true;
   if (_reflGroup)          _reflGroup.visible           = true;
   if (window._editorFloor) window._editorFloor.visible  = false;
+
+  // Восстанавливаем кувшинки
+  if (window._spawnLilypads) window._spawnLilypads();
 
   document.getElementById('editor-screen').style.display='none';
   document.getElementById('main-menu').classList.remove('hidden');
@@ -2906,11 +2909,26 @@ function buildReflection() {
       if (!child.isMesh || !child.material) return;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       child.material = mats.map(m => {
-        const nm = m.clone();
-        nm.transparent = false;
-        nm.opacity = 1.0;
-        nm.depthWrite = true;
-        nm.side = THREE.BackSide;
+        let nm;
+        // ShaderMaterial (старый wobble) и onBeforeCompile-материалы
+        // не клонируются корректно → берём цвет/текстуру и делаем чистый Lambert
+        if (m.isShaderMaterial || (m.onBeforeCompile && m.onBeforeCompile.toString().length > 10)) {
+          const col = m.uniforms && m.uniforms.uColor
+            ? m.uniforms.uColor.value
+            : (m.color ? m.color.clone() : new THREE.Color(0x7bc965));
+          const map = (m.uniforms && m.uniforms.uMap && m.uniforms.uMap.value)
+            ? m.uniforms.uMap.value
+            : (m.map || null);
+          nm = new THREE.MeshLambertMaterial({ color: col, map: map });
+        } else {
+          nm = m.clone();
+          if (m.map)    nm.map    = m.map;
+          if (m.color)  nm.color.copy(m.color);
+        }
+        nm.transparent  = false;
+        nm.opacity      = 1.0;
+        nm.depthWrite   = true;
+        nm.side         = THREE.BackSide;
         // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
         nm.stencilWrite = true;
         nm.stencilFunc  = THREE.AlwaysStencilFunc;
@@ -2943,34 +2961,31 @@ let rangeRing = null;
 
 
 // ══════════════════════════════════════════════════════════════════
-// WOBBLE — vertex shader качание растительности
-// Работает с едиными тайлами: маска по Y плавно отделяет крону от корней
+// WOBBLE — шейдерная анимация: только крона качается, основание неподвижно
+// Взято из Писюнк; освещение сделано ярче (ambient 0.55 + diff 0.65)
 // ══════════════════════════════════════════════════════════════════
-window._wobbleObjects = []; // { obj, phase, speed, amp, baseY }
+window._wobbleObjects = []; // { obj, phase, speed, amp, yMin, yMax }
 window._wobbleTime = 0;
 
-// Создаёт ShaderMaterial с wobble из оригинального MeshLambertMaterial
+// Создаёт ShaderMaterial с wobble из оригинального материала
 function makeWobbleMaterial(origMat, phase, speed, amp) {
-  // Vertex shader: нижние вершины неподвижны, верхние гнутся
-  // uMask = smoothstep(0..1) по нормализованной высоте → только крона двигается
   const vert = `
     uniform float uTime;
     uniform float uPhase;
     uniform float uSpeed;
     uniform float uAmp;
-    uniform float uYMin;  // мин Y объекта в local space
-    uniform float uYMax;  // макс Y объекта
+    uniform float uYMin;
+    uniform float uYMax;
     varying vec3 vNormal;
     varying vec2 vUv;
     void main() {
       vNormal = normalMatrix * normal;
       vUv = uv;
       vec3 pos = position;
-      // Маска: 0 у основания → 1 у кроны, с плавным переходом
+      // Маска: 0 у основания → 1 у кроны
       float mask = smoothstep(uYMin + (uYMax - uYMin)*0.25,
                               uYMin + (uYMax - uYMin)*0.75,
                               position.y);
-      // Два синуса — создают «живое» некруговое качание
       float windX = sin(uTime * uSpeed + uPhase) * uAmp * mask;
       float windZ = sin(uTime * uSpeed * 0.7 + uPhase + 1.3) * uAmp * 0.6 * mask;
       pos.x += windX;
@@ -2987,9 +3002,9 @@ function makeWobbleMaterial(origMat, phase, speed, amp) {
     void main() {
       vec3 col = uColor;
       if (uHasMap == 1) col *= texture2D(uMap, vUv).rgb;
-      // Простой Lambert
-      vec3 light = normalize(vec3(-0.5, 1.0, 0.8));
-      float diff = max(dot(normalize(vNormal), light), 0.0) * 0.6 + 0.4;
+      // Освещение: яркий ambient + diffuse чтобы деревья не были тёмными
+      vec3 light = normalize(vec3(-0.4, 1.0, 0.6));
+      float diff = max(dot(normalize(vNormal), light), 0.0) * 0.65 + 0.55;
       gl_FragColor = vec4(col * diff, 1.0);
     }
   `;
@@ -3004,7 +3019,7 @@ function makeWobbleMaterial(origMat, phase, speed, amp) {
     uMap:    { value: origMat.map || null },
     uHasMap: { value: origMat.map ? 1 : 0 },
   };
-  const mat = new THREE.ShaderMaterial({ vertexShader:vert, fragmentShader:frag, uniforms });
+  const mat = new THREE.ShaderMaterial({ vertexShader: vert, fragmentShader: frag, uniforms });
   mat.side = origMat.side || THREE.FrontSide;
   return mat;
 }
@@ -3013,20 +3028,16 @@ function makeWobbleMaterial(origMat, phase, speed, amp) {
 function applyWobble(obj, opts) {
   const { phase, speed, amp } = opts;
 
-  // Вычисляем bounding box в local space для маски
   const box = new THREE.Box3().setFromObject(obj);
-  // Конвертируем в local space объекта
   const invWorld = new THREE.Matrix4().copy(obj.matrixWorld).invert();
   const localBox = box.clone().applyMatrix4(invWorld);
   const yMin = localBox.min.y;
   const yMax = localBox.max.y;
-  const yRange = yMax - yMin;
 
   obj.traverse(m => {
     if (!m.isMesh) return;
     const origMat = Array.isArray(m.material) ? m.material[0] : m.material;
     const wMat = makeWobbleMaterial(origMat, phase, speed, amp);
-    // Вычисляем Y диапазон меша в local space объекта
     const meshBox = new THREE.Box3().setFromObject(m);
     const localMeshBox = meshBox.clone().applyMatrix4(invWorld);
     wMat.uniforms.uYMin.value = localMeshBox.min.y;
@@ -3039,7 +3050,7 @@ function applyWobble(obj, opts) {
   window._wobbleObjects.push({ obj, phase, speed, amp, yMin, yMax });
 }
 
-// Обновляет время для всех wobble материалов
+// Обновляет время для всех wobble шейдеров
 function updateWobble(dt) {
   window._wobbleTime += dt;
   const t = window._wobbleTime;
@@ -3081,19 +3092,43 @@ function gameLoop(ts) {
 
   // ── Анимация кувшинок и камышей ───────────────────────────
   if (window._lilypadMeshes && window._lilypadMeshes.length > 0) {
-    const realDt = Math.min((ts - lastTime) / 1000, 0.1); // без gameSpeed — на воде независимо
+    const rawDt = Math.min((ts - (window._lastLilyTs || ts)) / 1000, 0.05);
+    window._lastLilyTs = ts;
     for (const m of window._lilypadMeshes) {
       if (!m.userData.isLilypad) continue;
-      m.userData.lilyT += realDt * m.userData.lilySpeed;
+      m.userData.lilyT += rawDt * (m.userData.lilySpeed || 0.35);
       const t = m.userData.lilyT;
-      // Качание: плавный синус по X и Z
-      m.rotation.x = Math.sin(t + m.userData.lilyPhaseX) * m.userData.lilyAmpX;
-      m.rotation.z = Math.cos(t * 0.7 + m.userData.lilyPhaseZ) * m.userData.lilyAmpZ;
-      // Лёгкое покачивание по Y (волны)
-      m.position.y = m.userData.baseY + Math.sin(t * 1.1 + m.userData.lilyPhaseX) * 0.012;
-      // Медленный дрейф по течению
-      m.position.x += m.userData.lilyDriftX;
-      m.position.z += m.userData.lilyDriftZ;
+
+      // Покачивание по X и Z — два слоя синусов для «живого» эффекта
+      m.rotation.x = Math.sin(t   + m.userData.lilyPhaseX)          * m.userData.lilyAmpX
+                   + Math.sin(t*2.3 + m.userData.lilyPhaseX * 0.7)  * m.userData.lilyAmpX * 0.35;
+      m.rotation.z = Math.cos(t*0.8 + m.userData.lilyPhaseZ)        * m.userData.lilyAmpZ
+                   + Math.cos(t*1.7 + m.userData.lilyPhaseZ * 0.5)  * m.userData.lilyAmpZ * 0.25;
+
+      // Волна по Y — кувшинка приподнимается на гребне
+      m.position.y = m.userData.baseY
+                   + Math.sin(t*0.7  + m.userData.lilyPhaseX) * 0.018
+                   + Math.sin(t*1.5  + m.userData.lilyPhaseZ) * 0.008
+                   + Math.sin(t*0.31 + (m.userData.lilyPhaseX||0)*0.3) * 0.005;
+
+      // Медленное вращение вокруг Y (кувшинку кружит течением)
+      if (m.userData.lilyRotSpeed) m.rotation.y += rawDt * m.userData.lilyRotSpeed;
+
+      // ТЕЧЕНИЕ: дрейф + зацикливание
+      if (m.userData.lilyDriftX || m.userData.lilyDriftZ) {
+        m.position.x += m.userData.lilyDriftX;
+        m.position.z += m.userData.lilyDriftZ;
+        // Если уплыла слишком далеко — мягко возвращаем с обратной стороны
+        if (m.userData.spawnX !== undefined) {
+          const ddx = m.position.x - m.userData.spawnX;
+          const ddz = m.position.z - m.userData.spawnZ;
+          const dist2 = Math.sqrt(ddx*ddx + ddz*ddz);
+          if (dist2 > (m.userData.maxDrift || 20)) {
+            m.position.x = m.userData.spawnX - ddx * 0.97;
+            m.position.z = m.userData.spawnZ - ddz * 0.97;
+          }
+        }
+      }
     }
   }
 
@@ -3948,10 +3983,17 @@ function onWheel(e) {
 // GAME FLOW
 // ============================================================
 function startGame(mapGrid, customCellData, freeObjsData) {
+  try {
+  console.log('[startGame] called, mapGrid rows:', mapGrid ? mapGrid.length : 'null');
   grid = mapGrid.map(r => [...r]);
   path = computePath(grid);
   paths = computeAllPaths(grid);
   roadGraph = buildRoadGraph(grid);
+
+  if (path.length < 2) {
+    alert('Ошибка: на карте нет пути от старта до финиша!');
+    return;
+  }
   
   // Reset state
   towers = [];
@@ -3970,6 +4012,8 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   
   // Build 3D map
   buildMap(grid, customCellData || null);
+  // Пересоздаём кувшинки (clearScene их убрала из _persistentObjects тоже)
+  if (window._spawnLilypads) window._spawnLilypads();
   buildReflection();
   // Загружаем свободно размещённые объекты (декор не на сетке)
   if (freeObjsData && freeObjsData.length > 0) {
@@ -3988,6 +4032,17 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       obj.userData = { freeObj: true, modelKey: fo.modelKey };
       scene.add(obj);
       tileObjects.push(obj); // чтобы попало в отражение
+      // Wobble для пальм и деревьев в freeObjs
+      const _palmTreeKeys = ['pirate_palm_straight','pirate_palm_bend',
+        'pirate_palm_detailed_straight','pirate_palm_detailed_bend',
+        'tile_tree','tile_tree_double','tile_tree_quad',
+        'snow_tile_tree','snow_tile_tree_double'];
+      if (_palmTreeKeys.includes(fo.modelKey)) {
+        const _fp = Math.random() * Math.PI * 2;
+        const _fs = 1.0 + Math.random() * 1.2;  // было 0.5+0.6
+        const _fa = 0.07 + Math.random() * 0.08; // было 0.05+0.05
+        applyWobble(obj, { phase: _fp, speed: _fs, amp: _fa });
+      }
     });
     buildReflection(); // перестроим отражение с учётом freeObjs
   }
@@ -4012,6 +4067,10 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   
   gameState = 'playing';
   updateCamera();
+  } catch(e) {
+    console.error('startGame error:', e);
+    alert('Ошибка запуска игры: ' + e.message);
+  }
 }
 
 function triggerGameOver() {
@@ -4086,7 +4145,10 @@ function setupEvents() {
   document.getElementById('btn-deselect').addEventListener('click', deselectAll);
   
   // Main menu
-  document.getElementById('btn-play').addEventListener('click', () => startGame(DEFAULT_MAP, DEFAULT_CELL_DATA, DEFAULT_FREE_OBJS));
+  document.getElementById('btn-play').addEventListener('click', () => {
+    console.log('[PLAY] button clicked');
+    startGame(DEFAULT_MAP, null, DEFAULT_FREE_OBJS);
+  });
   document.getElementById('btn-maps').addEventListener('click', openMyMaps);
   document.getElementById('btn-maps-close').addEventListener('click', () => {
     document.getElementById('my-maps-modal').classList.add('hidden');
@@ -4095,7 +4157,7 @@ function setupEvents() {
   setupEditorEvents();
   
   // Game over
-  document.getElementById('btn-go-retry').addEventListener('click', () => startGame(DEFAULT_MAP, DEFAULT_CELL_DATA, DEFAULT_FREE_OBJS));
+  document.getElementById('btn-go-retry').addEventListener('click', () => startGame(DEFAULT_MAP, null, DEFAULT_FREE_OBJS));
   document.getElementById('btn-go-menu').addEventListener('click', goToMenu);
   document.getElementById('btn-win-menu').addEventListener('click', goToMenu);
 }
