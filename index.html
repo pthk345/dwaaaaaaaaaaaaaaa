@@ -28,7 +28,7 @@ font-family:‘Nunito’,‘SF Pro Rounded’,system-ui,sans-serif;
 color:#fff;
 touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.98);}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(1.04) contrast(1.03);}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -1074,7 +1074,7 @@ function initThree() {
   // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
   // density 0.018: ближние тайлы чёткие, горизонт тает
   // Цвет совпадает с небом → плавный переход
-  scene.fog = new THREE.FogExp2(0xb8d4e8, 0.030);
+  scene.fog = new THREE.FogExp2(0xb8d4e8, 0.026);
   window._gameFog = scene.fog;
 
   // ══ НЕБО ══════════════════════════════════
@@ -1107,53 +1107,60 @@ function initThree() {
 
   // ══ ОСВЕЩЕНИЕ — красивый картунный стиль ══════════════════════
 
+  // Tone mapping: ACESFilmic даёт приятный контраст и насыщенность
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.85;
+  renderer.toneMappingExposure = 0.85; // -30% от 1.15
 
-  // 1. Hemisphere — поднят чтобы тёмные стороны не уходили в чёрный
+  // 1. Hemisphere light — небо сверху (тёплый голубой) + земля снизу (тёплый зелёный)
   const hemiLight = new THREE.HemisphereLight(
     0xc8e8ff,  // skyColor: нежный голубой
     0x8fc870,  // groundColor: травяной зелёный
-    0.85       // было 0.52 — поднято чтобы тени не были чёрными
+    0.52       // -30% от 0.75
   );
   hemiLight.userData.persistent = true;
   scene.add(hemiLight);
 
-  // 2. Главный солнечный свет
+  // 2. Главный солнечный свет — тени рисует только он
   const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.55);
   sunLight.position.set(-8, 22, 12);
   sunLight.castShadow = true;
 
+  // 4096 mapSize — максимум для мобильных, убирает пикселизацию
   sunLight.shadow.mapSize.width  = 4096;
   sunLight.shadow.mapSize.height = 4096;
   sunLight.shadow.camera.near = 0.5;
   sunLight.shadow.camera.far  = 80;
+  // Охватываем весь остров 20x20 тайлов
   sunLight.shadow.camera.left   = -25;
   sunLight.shadow.camera.right  =  25;
   sunLight.shadow.camera.top    =  25;
   sunLight.shadow.camera.bottom = -25;
 
+  // Ключевые параметры мягких теней без полос:
+  // bias: небольшой отрицательный убирает shadow acne
+  // normalBias: компенсирует артефакты на наклонных поверхностях
+  // radius: размытие PCF — чем больше тем мягче тень
   sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.08;
-  sunLight.shadow.radius     =  8;
+  sunLight.shadow.normalBias =  0.02;
+  sunLight.shadow.radius     =  12;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
 
-  // 3. Контровой свет
-  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.38);
+  // 3. Контровой свет (rim) — холодный голубоватый сзади-справа
+  const rimLight = new THREE.DirectionalLight(0x9ecfff, 0.38); // -30%
   rimLight.position.set(14, 10, -12);
   rimLight.userData.persistent = true;
   scene.add(rimLight);
 
-  // 4. Заполняющий свет спереди
-  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.28);
+  // 4. Заполняющий свет спереди — поднимает тёмные грани
+  const fillLight = new THREE.DirectionalLight(0xffddb0, 0.28); // -30%
   fillLight.position.set(5, 6, 18);
   fillLight.userData.persistent = true;
   scene.add(fillLight);
 
-  // 5. Ambient — поднят чтобы тени были серыми а не чёрными
-  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.45); // было 0.13
+  // 5. Минимальный ambient
+  const ambLight = new THREE.AmbientLight(0xfff8f0, 0.13); // -30%
   ambLight.userData.persistent = true;
   scene.add(ambLight);
 
@@ -1679,6 +1686,77 @@ function buildMap(g, customCellData) {
   }
   } // end !isEditorMap
 
+  // ═══════════════════════════════════════════════════════════
+  // ISLAND OUTLINE — тонкая обводка только по внешнему краю
+  // острова (Cel-shading стиль). Рисуем рёбра только там, где
+  // тайл граничит с пустотой/краем карты → никакой сетки внутри.
+  // ═══════════════════════════════════════════════════════════
+  if (!isEditorMap) {
+    // Собираем все занятые ячейки
+    const _islandCells = new Set();
+    for (let r = 0; r < GRID_H; r++)
+      for (let c = 0; c < GRID_W; c++)
+        if (tileMeshGrid[r][c] !== null) _islandCells.add(r + ',' + c);
+
+    const _outlinePts = [];
+    const _S = TILE_SIZE;
+    const _OY = 0.10; // высота линии над землёй — чуть над поверхностью тайла
+
+    for (let r = 0; r < GRID_H; r++) {
+      for (let c = 0; c < GRID_W; c++) {
+        if (!_islandCells.has(r + ',' + c)) continue;
+
+        const x0 = c * _S - _S * 0.5;
+        const x1 = c * _S + _S * 0.5;
+        const z0 = r * _S - _S * 0.5;
+        const z1 = r * _S + _S * 0.5;
+
+        // North edge (r-1 пуст)
+        if (r === 0 || !_islandCells.has((r-1)+','+ c)) {
+          _outlinePts.push(new THREE.Vector3(x0, _OY, z0), new THREE.Vector3(x1, _OY, z0));
+        }
+        // South edge (r+1 пуст)
+        if (r === GRID_H-1 || !_islandCells.has((r+1)+','+ c)) {
+          _outlinePts.push(new THREE.Vector3(x0, _OY, z1), new THREE.Vector3(x1, _OY, z1));
+        }
+        // West edge (c-1 пуст)
+        if (c === 0 || !_islandCells.has(r +','+ (c-1))) {
+          _outlinePts.push(new THREE.Vector3(x0, _OY, z0), new THREE.Vector3(x0, _OY, z1));
+        }
+        // East edge (c+1 пуст)
+        if (c === GRID_W-1 || !_islandCells.has(r +','+ (c+1))) {
+          _outlinePts.push(new THREE.Vector3(x1, _OY, z0), new THREE.Vector3(x1, _OY, z1));
+        }
+      }
+    }
+
+    if (_outlinePts.length > 0) {
+      const _outlineGeo = new THREE.BufferGeometry().setFromPoints(_outlinePts);
+      // Тёмно-синяя обводка — мультяшный контур, не чисто чёрный
+      const _outlineMat = new THREE.LineBasicMaterial({
+        color: 0x1a1a2e,
+        linewidth: 1, // WebGL ограничивает linewidth=1 на большинстве устройств,
+                      // поэтому используем немного смещённые дубликаты для толщины
+        depthTest: true,
+        transparent: false,
+      });
+      const _outlineMesh = new THREE.LineSegments(_outlineGeo, _outlineMat);
+      _outlineMesh.renderOrder = 2;
+      _outlineMesh.userData.isIslandOutline = true;
+      addToScene(_outlineMesh);
+
+      // Второй слой чуть выше — даёт визуальную толщину линии
+      // (WebGL не поддерживает linewidth > 1 на GPU без расширений)
+      const _outlineMat2 = _outlineMat.clone();
+      const _outlineMesh2 = new THREE.LineSegments(_outlineGeo, _outlineMat2);
+      _outlineMesh2.position.y = 0.04;
+      _outlineMesh2.renderOrder = 2;
+      _outlineMesh2.userData.isIslandOutline = true;
+      addToScene(_outlineMesh2);
+    }
+  }
+  // ═══════════════════════════════════════════════════════════
+
   camTarget.set((GRID_W-1)/2*TILE_SIZE, 0, (GRID_H-1)/2*TILE_SIZE);
   camDist = 26;
   camElevation = Math.PI / 3.2;
@@ -2108,7 +2186,7 @@ function closeEditor() {
   // ── Восстанавливаем небо/океан при выходе из редактора ──
   if (window._skyTex) {
     scene.background = window._skyTex;
-    scene.fog = window._gameFog || new THREE.FogExp2(0xb8d4e8, 0.030);
+    scene.fog = window._gameFog || new THREE.FogExp2(0xb8d4e8, 0.026);
   } else {
     scene.background = new THREE.Color(0x87ceeb);
   }
@@ -3044,6 +3122,8 @@ function buildReflection() {
   const grp = new THREE.Group();
 
   tileObjects.forEach(obj => {
+    // Outline-линии острова не отражаем — они наземные и дают артефакты
+    if (obj.userData.isIslandOutline) return;
     const clone = obj.clone();
     clone.traverse(child => {
       if (!child.isMesh || !child.material) return;
