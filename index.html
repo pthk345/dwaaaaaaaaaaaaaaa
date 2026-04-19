@@ -3226,8 +3226,13 @@ function updateWobble(dt) {
 
 const _OUTLINE_VERT = `
   void main() {
-    vec3 pos = position + normal * 0.04;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    // Смещаем в clip-space — толщина одинакова на любом расстоянии
+    // и соседний тайл гарантированно перекрывает outline изнутри
+    vec4 clipPos  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 clipNorm = projectionMatrix * modelViewMatrix * vec4(position + normal, 1.0);
+    vec2 offset   = normalize(clipNorm.xy / clipNorm.w - clipPos.xy / clipPos.w);
+    clipPos.xy   += offset * 0.003 * clipPos.w;
+    gl_Position   = clipPos;
   }
 `;
 const _OUTLINE_FRAG = `
