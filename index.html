@@ -3079,7 +3079,7 @@ function buildReflection() {
           const map = (m.uniforms && m.uniforms.uMap && m.uniforms.uMap.value)
             ? m.uniforms.uMap.value
             : (m.map || null);
-          nm = new THREE.MeshLambertMaterial({ color: col, map: map });
+          nm = new THREE.MeshLambertMaterial({ color: col, map: map, side: m.side || THREE.FrontSide });
         } else {
           nm = m.clone();
           if (m.map)    nm.map    = m.map;
@@ -3088,7 +3088,16 @@ function buildReflection() {
         nm.transparent  = false;
         nm.opacity      = 1.0;
         nm.depthWrite   = true;
-        nm.side         = THREE.BackSide;
+        // При scale(1,-1,1) winding order переворачивается:
+        // FrontSide оригинала → нужен BackSide в отражении (и наоборот)
+        // DoubleSide оставляем как есть — он работает в обе стороны
+        if (m.side === THREE.DoubleSide) {
+          nm.side = THREE.DoubleSide;
+        } else if (m.side === THREE.BackSide) {
+          nm.side = THREE.FrontSide;
+        } else {
+          nm.side = THREE.BackSide;
+        }
         // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
         nm.stencilWrite = true;
         nm.stencilFunc  = THREE.AlwaysStencilFunc;
@@ -4397,20 +4406,10 @@ function openEditorWithMap(map, idx) {
     addToScene(line); tileObjects.push(line);
   }
 
-  // Расставляем тайлы из сохранённой карты
+  // Расставляем ВСЕ тайлы через rebuildEditorCell — она обрабатывает
+  // все типы включая TILE_GRASS с кастомными моделями (горки, камни и т.д.)
   for(let r=0;r<GRID_H;r++) for(let c=0;c<GRID_W;c++) {
-    const tt = editorGrid[r][c];
-    if(tt === TILE_GRASS) continue;
-    const data = edCellData[edKey(r,c)];
-    if(!data) continue;
-    const obj = assets.clone(data.modelKey);
-    if(!obj) continue;
-    scaleTo(obj, TILE_SIZE);
-    obj.rotation.y = data.rot || 0;
-    obj.position.set(c*TILE_SIZE, 0, r*TILE_SIZE);
-    obj.traverse(m=>{ if(m.isMesh){ m.castShadow=true; m.receiveShadow=true; }});
-    obj.userData = { type:'tile', row:r, col:c, tileType:tt };
-    addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
+    rebuildEditorCell(r, c);
   }
 
   // Загружаем свободно размещённые объекты
