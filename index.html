@@ -1070,11 +1070,8 @@ function initThree() {
   scene = new THREE.Scene();
   // Небо загружается ниже через TextureLoader
   scene.background = new THREE.Color(0x87ceeb); // временный голубой
-
-  // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
-  // density 0.018: ближние тайлы чёткие, горизонт тает
-  // Цвет совпадает с небом → плавный переход
-  scene.fog = new THREE.FogExp2(0xc2daea, 0.028);
+  // Лёгкая атмосферная дымка
+  scene.fog = new THREE.FogExp2(0xc5dce8, 0.032);
   window._gameFog = scene.fog;
 
   // ══ НЕБО ══════════════════════════════════
@@ -1140,12 +1137,9 @@ function initThree() {
   // bias: небольшой отрицательный убирает shadow acne
   // normalBias: компенсирует артефакты на наклонных поверхностях
   // radius: размытие PCF — чем больше тем мягче тень
-  // bias: чуть менее агрессивный — убирает грубые полосы acne
-  // normalBias: выше — компенсирует acne на скошенных low-poly гранях
-  // radius: меньше — тень резче → силуэт читается как cavity
-  sunLight.shadow.bias       = -0.0001;
-  sunLight.shadow.normalBias =  0.06;
-  sunLight.shadow.radius     =  4;
+  sunLight.shadow.bias       = -0.0003;  // сохраняем — даёт edge-highlight эффект
+  sunLight.shadow.normalBias =  0.08;  // выше → убирает acne на скошенных гранях
+  sunLight.shadow.radius     =  8;    // чуть чётче чем 12
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -2077,7 +2071,7 @@ function buildEditorEmptyMap() {
   clearScene();
   // Серый фон для редактора (после clearScene который его не трогает)
   scene.background = new THREE.Color(0x39393b);
-  scene.fog = null; // в редакторе туман не нужен
+  scene.fog = null;
   renderer.setClearColor(0x39393b, 1);
   // Показываем шахматный пол, прячем игровые объекты
   if (window._editorFloor) window._editorFloor.visible = true;
@@ -2118,7 +2112,7 @@ function closeEditor() {
   // ── Восстанавливаем небо/океан при выходе из редактора ──
   if (window._skyTex) {
     scene.background = window._skyTex;
-    scene.fog = window._gameFog || new THREE.FogExp2(0xb8d4e8, 0.018);
+    if (window._gameFog) scene.fog = window._gameFog;
   } else {
     scene.background = new THREE.Color(0x87ceeb);
   }
