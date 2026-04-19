@@ -28,7 +28,7 @@ font-family:‘Nunito’,‘SF Pro Rounded’,system-ui,sans-serif;
 color:#fff;
 touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.92);}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.97);}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -1074,7 +1074,7 @@ function initThree() {
   // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
   // density 0.018: ближние тайлы чёткие, горизонт тает
   // Цвет совпадает с небом → плавный переход
-  scene.fog = new THREE.FogExp2(0xb8d4e8, 0.018);
+  scene.fog = new THREE.FogExp2(0xc2daea, 0.028);
   window._gameFog = scene.fog;
 
   // ══ НЕБО ══════════════════════════════════
@@ -1140,9 +1140,12 @@ function initThree() {
   // bias: небольшой отрицательный убирает shadow acne
   // normalBias: компенсирует артефакты на наклонных поверхностях
   // radius: размытие PCF — чем больше тем мягче тень
-  sunLight.shadow.bias       = -0.0003;
-  sunLight.shadow.normalBias =  0.02;
-  sunLight.shadow.radius     =  12;
+  // bias: чуть менее агрессивный — убирает грубые полосы acne
+  // normalBias: выше — компенсирует acne на скошенных low-poly гранях
+  // radius: меньше — тень резче → силуэт читается как cavity
+  sunLight.shadow.bias       = -0.0001;
+  sunLight.shadow.normalBias =  0.06;
+  sunLight.shadow.radius     =  4;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
