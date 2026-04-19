@@ -3218,20 +3218,17 @@ function updateWobble(dt) {
 // ══════════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════════
-// CEL-SHADING OUTLINE
-// Для каждого меша тайла создаём клон с BackSide-шейдером который
-// смещает вершины по нормали наружу → виден только снаружи тайла.
-// Соседние тайлы перекрывают outline изнутри → сетки нет.
+// CEL-SHADING OUTLINE — merged geometry inverted hull
+// Объединяем ВСЕ тайловые меши в одну геометрию → внутренние грани
+// между соседями исчезают → BackSide outline виден только снаружи.
 // ══════════════════════════════════════════════════════════════════
 
 const _OUTLINE_VERT = `
   void main() {
-    // Смещаем в clip-space — толщина одинакова на любом расстоянии
-    // и соседний тайл гарантированно перекрывает outline изнутри
     vec4 clipPos  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     vec4 clipNorm = projectionMatrix * modelViewMatrix * vec4(position + normal, 1.0);
-    vec2 offset   = normalize(clipNorm.xy / clipNorm.w - clipPos.xy / clipPos.w);
-    clipPos.xy   += offset * 0.003 * clipPos.w;
+    vec2 dir      = normalize(clipNorm.xy / clipNorm.w - clipPos.xy / clipPos.w);
+    clipPos.xy   += dir * 0.004 * clipPos.w;
     gl_Position   = clipPos;
   }
 `;
@@ -3241,56 +3238,71 @@ const _OUTLINE_FRAG = `
   }
 `;
 
-function _makeOutlineMat() {
-  return new THREE.ShaderMaterial({
+function buildCelOutlines() {
+  // Удаляем старый outline
+  const old = [];
+  scene.traverse(o => { if (o.userData.isCelOutline) old.push(o); });
+  old.forEach(o => { if (o.parent) o.parent.remove(o); });
+
+  scene.updateMatrixWorld(true);
+
+  const positions = [];
+  const normals   = [];
+
+  tileObjects.forEach(obj => {
+    if (!obj.userData || obj.userData.type !== 'tile') return;
+
+    obj.traverse(child => {
+      if (!child.isMesh || !child.geometry) return;
+      const geo = child.geometry;
+      if (!geo.attributes.position) return;
+      if (!geo.attributes.normal) geo.computeVertexNormals();
+
+      // Клонируем геометрию и переводим в мировое пространство
+      const geoC = geo.clone();
+      geoC.applyMatrix4(child.matrixWorld);
+
+      const pos = geoC.attributes.position;
+      const nor = geoC.attributes.normal;
+
+      if (geoC.index) {
+        const idx = geoC.index.array;
+        for (let i = 0; i < idx.length; i++) {
+          const v = idx[i];
+          positions.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+          normals.push(  nor.getX(v), nor.getY(v), nor.getZ(v));
+        }
+      } else {
+        for (let i = 0; i < pos.count; i++) {
+          positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+          normals.push(  nor.getX(i), nor.getY(i), nor.getZ(i));
+        }
+      }
+    });
+  });
+
+  if (positions.length === 0) return;
+
+  const mergedGeo = new THREE.BufferGeometry();
+  mergedGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  mergedGeo.setAttribute('normal',   new THREE.Float32BufferAttribute(normals,   3));
+
+  const outMat = new THREE.ShaderMaterial({
     vertexShader:   _OUTLINE_VERT,
     fragmentShader: _OUTLINE_FRAG,
     side:       THREE.BackSide,
     depthWrite: true,
     depthTest:  true,
   });
+
+  const mesh = new THREE.Mesh(mergedGeo, outMat);
+  mesh.userData.isCelOutline = true;
+  mesh.matrixAutoUpdate = false; // геометрия уже в world space
+  scene.add(mesh);
 }
 
-function buildCelOutlines() {
-  // Удаляем старые клоны
-  const old = [];
-  scene.traverse(o => { if (o.userData.isCelOutline) old.push(o); });
-  old.forEach(o => { if (o.parent) o.parent.remove(o); });
-
-  const outMat = _makeOutlineMat();
-
-  // Обновляем мировые матрицы
-  scene.updateMatrixWorld(true);
-
-  tileObjects.forEach(obj => {
-    if (!obj.userData || obj.userData.type !== 'tile') return;
-
-    obj.traverse(child => {
-      if (!child.isMesh) return;
-      if (!child.geometry) return;
-      if (!child.geometry.attributes.normal) {
-        child.geometry.computeVertexNormals();
-      }
-
-      const clone = new THREE.Mesh(child.geometry, outMat);
-      clone.userData.isCelOutline = true;
-      // Берём мировую матрицу — clone добавляется прямо в scene
-      clone.applyMatrix4(child.matrixWorld);
-      clone.matrixAutoUpdate = false;
-      scene.add(clone);
-    });
-  });
-}
-
-function clearCelOutlines() {
-  const old = [];
-  scene.traverse(o => { if (o.userData.isCelOutline) old.push(o); });
-  old.forEach(o => { if (o.parent) o.parent.remove(o); });
-}
-// ══════════════════════════════════════════════════════════════════
-
-// Убираем renderOutlinePass — он больше не нужен
 function renderOutlinePass() { /* no-op */ }
+// ══════════════════════════════════════════════════════════════════
 
 function gameLoop(ts) {
   animFrameId = requestAnimationFrame(gameLoop);
