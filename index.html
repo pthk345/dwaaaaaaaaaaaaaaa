@@ -28,7 +28,7 @@ font-family:‘Nunito’,‘SF Pro Rounded’,system-ui,sans-serif;
 color:#fff;
 touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.97);}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.98);}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -1070,8 +1070,11 @@ function initThree() {
   scene = new THREE.Scene();
   // Небо загружается ниже через TextureLoader
   scene.background = new THREE.Color(0x87ceeb); // временный голубой
-  // Лёгкая атмосферная дымка
-  scene.fog = new THREE.FogExp2(0xc5dce8, 0.032);
+
+  // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
+  // density 0.018: ближние тайлы чёткие, горизонт тает
+  // Цвет совпадает с небом → плавный переход
+  scene.fog = new THREE.FogExp2(0xb8d4e8, 0.030);
   window._gameFog = scene.fog;
 
   // ══ НЕБО ══════════════════════════════════
@@ -1137,9 +1140,9 @@ function initThree() {
   // bias: небольшой отрицательный убирает shadow acne
   // normalBias: компенсирует артефакты на наклонных поверхностях
   // radius: размытие PCF — чем больше тем мягче тень
-  sunLight.shadow.bias       = -0.0003;  // сохраняем — даёт edge-highlight эффект
-  sunLight.shadow.normalBias =  0.08;  // выше → убирает acne на скошенных гранях
-  sunLight.shadow.radius     =  8;    // чуть чётче чем 12
+  sunLight.shadow.bias       = -0.0003;
+  sunLight.shadow.normalBias =  0.08;
+  sunLight.shadow.radius     =  8;
 
   sunLight.userData.persistent = true;
   scene.add(sunLight);
@@ -2071,7 +2074,7 @@ function buildEditorEmptyMap() {
   clearScene();
   // Серый фон для редактора (после clearScene который его не трогает)
   scene.background = new THREE.Color(0x39393b);
-  scene.fog = null;
+  scene.fog = null; // в редакторе туман не нужен
   renderer.setClearColor(0x39393b, 1);
   // Показываем шахматный пол, прячем игровые объекты
   if (window._editorFloor) window._editorFloor.visible = true;
@@ -2112,7 +2115,7 @@ function closeEditor() {
   // ── Восстанавливаем небо/океан при выходе из редактора ──
   if (window._skyTex) {
     scene.background = window._skyTex;
-    if (window._gameFog) scene.fog = window._gameFog;
+    scene.fog = window._gameFog || new THREE.FogExp2(0xb8d4e8, 0.030);
   } else {
     scene.background = new THREE.Color(0x87ceeb);
   }
