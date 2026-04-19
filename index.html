@@ -28,7 +28,12 @@ font-family:‘Nunito’,‘SF Pro Rounded’,system-ui,sans-serif;
 color:#fff;
 touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(1.04) contrast(1.03);}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;
+  /* ═══ ПОСТОБРАБОТКА — меняй значения здесь ═══════════════════════════════
+     contrast: 1.00=норма  1.05=+5%  1.10=+10%  (текущее: +5%)
+     saturate: 1.00=норма  1.06=+6%  1.12=+12%  (текущее: +6%)  */
+  filter: contrast(1.05) saturate(1.06);
+}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -1064,6 +1069,7 @@ function initThree() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  /* ─ Экспозиция рендера: 0.85=чуть темнее нормы, 1.0=норма, 1.15=ярче ─ */
   renderer.toneMappingExposure = 0.85;
   renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
   
@@ -3051,8 +3057,6 @@ function buildReflection() {
   const grp = new THREE.Group();
 
   tileObjects.forEach(obj => {
-    // Outline-линии и cel-outline меши не отражаем — артефакты
-    if (obj.userData.isIslandOutline || obj.userData.isCelOutline) return;
     const clone = obj.clone();
     clone.traverse(child => {
       if (!child.isMesh || !child.material) return;
@@ -3077,7 +3081,7 @@ function buildReflection() {
         nm.transparent  = false;
         nm.opacity      = 1.0;
         nm.depthWrite   = true;
-        nm.side         = THREE.BackSide;
+        nm.side         = THREE.FrontSide; // FrontSide верно: grp.scale(1,-1,1) уже зеркалит геометрию
         // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
         nm.stencilWrite = true;
         nm.stencilFunc  = THREE.AlwaysStencilFunc;
@@ -3214,94 +3218,6 @@ function updateWobble(dt) {
       }
     });
   }
-}
-// ══════════════════════════════════════════════════════════════════
-
-// ══════════════════════════════════════════════════════════════════
-// CEL-SHADING OUTLINE — Inverted Hull шейдер
-// Принцип: клонируем каждый меш тайла, рендерим его BackSide,
-// в вертексном шейдере толкаем вершины наружу по нормали.
-// Результат: тонкая тёмная обводка вокруг каждого объекта.
-// Но так как все тайлы плотно прилегают друг к другу —
-// внутренние рёбра между ними перекрываются самими мешами,
-// и видна только ВНЕШНЯЯ обводка острова. Никакой сетки!
-// ══════════════════════════════════════════════════════════════════
-
-const _CEL_OUTLINE_VERT = `
-  uniform float uThickness;
-  void main() {
-    // Толкаем вершину наружу по нормали в clip space
-    vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    vec3 clipNorm = normalize((projectionMatrix * modelViewMatrix * vec4(normal, 0.0)).xyz);
-    // Смещение в clip space — одинаковая толщина независимо от расстояния
-    clipPos.xy += clipNorm.xy * uThickness * clipPos.w;
-    gl_Position = clipPos;
-  }
-`;
-
-const _CEL_OUTLINE_FRAG = `
-  uniform vec3 uColor;
-  uniform float uAlpha;
-  void main() {
-    gl_FragColor = vec4(uColor, uAlpha);
-  }
-`;
-
-// Создаёт outline-клон объекта и добавляет его в сцену
-function addCelOutline(obj, thickness, color) {
-  obj.updateMatrixWorld(true);
-  obj.traverse(child => {
-    if (!child.isMesh) return;
-    if (!child.geometry || !child.geometry.attributes.normal) return;
-    // Пропускаем спрайты здоровья, частицы и прочий не-тайловый мусор
-    if (child.geometry.type === 'SphereGeometry' && child.geometry.parameters && child.geometry.parameters.radius < 0.1) return;
-
-    const outlineMat = new THREE.ShaderMaterial({
-      vertexShader:   _CEL_OUTLINE_VERT,
-      fragmentShader: _CEL_OUTLINE_FRAG,
-      uniforms: {
-        uThickness: { value: thickness },
-        uColor:     { value: new THREE.Color(color) },
-        uAlpha:     { value: 1.0 },
-      },
-      side:        THREE.BackSide,
-      depthWrite:  true,
-      transparent: false,
-    });
-
-    const outlineMesh = new THREE.Mesh(child.geometry, outlineMat);
-    // Копируем локальную трансформацию — outline живёт в том же родителе
-    outlineMesh.position.copy(child.position);
-    outlineMesh.rotation.copy(child.rotation);
-    outlineMesh.scale.copy(child.scale);
-    outlineMesh.userData.isCelOutline = true;
-    outlineMesh.renderOrder = -1;
-
-    // Добавляем как брат (sibling) в того же родителя что и child
-    const parent = child.parent || obj;
-    parent.add(outlineMesh);
-  });
-}
-
-// Вызывается после buildMap — обходит все тайлы и добавляет outline
-function buildCelOutlines() {
-  // Удаляем старые outline-меши если есть
-  const toRemove = scene.children.filter(o => o.userData.isCelOutline);
-  toRemove.forEach(o => scene.remove(o));
-
-  // Обновляем мировые матрицы перед чтением
-  scene.updateMatrixWorld(true);
-
-  // Только тайлы острова (не башни, не враги, не частицы)
-  // Толщина в clip-space единицах — 0.004 даёт ~2-3px линию
-  const OUTLINE_THICKNESS = 0.006;
-  const OUTLINE_COLOR     = 0x1a1020; // очень тёмный, почти чёрный с синеватым оттенком
-
-  tileObjects.forEach(obj => {
-    if (!obj.userData.type || obj.userData.type !== 'tile') return;
-    if (obj.userData.isIslandOutline || obj.userData.isCelOutline) return;
-    addCelOutline(obj, OUTLINE_THICKNESS, OUTLINE_COLOR);
-  });
 }
 // ══════════════════════════════════════════════════════════════════
 
@@ -4259,9 +4175,6 @@ function startGame(mapGrid, customCellData, freeObjsData) {
   // Пересоздаём кувшинки (clearScene их убрала из _persistentObjects тоже)
   if (window._spawnLilypads) window._spawnLilypads();
   buildReflection();
-  // CEL-SHADING: обводка острова через inverted-hull шейдер
-  // Вызываем с небольшой задержкой чтобы matrixWorld успел обновиться
-  setTimeout(() => { try { buildCelOutlines(); } catch(e) { console.warn('outline err:', e); } }, 100);
   // Загружаем свободно размещённые объекты (декор не на сетке)
   if (freeObjsData && freeObjsData.length > 0) {
     freeObjsData.forEach(fo => {
