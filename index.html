@@ -2114,10 +2114,10 @@ function closeEditor() {
   gameState = 'menu';
   if(edHoverMesh) { edHoverMesh.visible=false; }
 
-  // ── Восстанавливаем небо/океан при выходе из редактора ──
+  // ── Восстанавливаем небо/океан/туман при выходе из редактора ──
+  scene.fog = window._gameFog || new THREE.FogExp2(0xe1c9bb, 0.026);
   if (window._skyTex) {
     scene.background = window._skyTex;
-    scene.fog = window._gameFog || new THREE.FogExp2(0xe1c9bb, 0.026);
   } else {
     scene.background = new THREE.Color(0x87ceeb);
   }
@@ -4406,9 +4406,13 @@ function openEditorWithMap(map, idx) {
     addToScene(line); tileObjects.push(line);
   }
 
-  // Расставляем ВСЕ тайлы через rebuildEditorCell — она обрабатывает
-  // все типы включая TILE_GRASS с кастомными моделями (горки, камни и т.д.)
+  // Расставляем только ячейки с данными в cellData —
+  // пустые TILE_GRASS без кастомной модели не трогаем (редактор их не показывает)
   for(let r=0;r<GRID_H;r++) for(let c=0;c<GRID_W;c++) {
+    const tt = editorGrid[r][c];
+    const hasData = !!edCellData[edKey(r,c)];
+    // Пропускаем пустую траву — она не рендерится в редакторе
+    if(tt === TILE_GRASS && !hasData) continue;
     rebuildEditorCell(r, c);
   }
 
