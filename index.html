@@ -1475,7 +1475,7 @@ function buildMap(g, customCellData) {
       try {
         const phase = (r * 2.71 + c * 1.61) % (Math.PI * 2);
         const speed = 1.2 + ((r * 7 + c * 13) % 100) / 100 * 1.0;
-        const amp   = 0.08 + ((r * 3 + c * 17) % 100) / 100 * 0.06;
+        const amp   = 0.03 + ((r * 3 + c * 17) % 100) / 100 * 0.02;
         applyWobble(obj, { phase, speed, amp });
       } catch(e) { console.warn('wobble tree error:', e); }
     }
@@ -1486,7 +1486,7 @@ function buildMap(g, customCellData) {
       try {
         const phase = (r * 3.14 + c * 2.72 + 0.5) % (Math.PI * 2);
         const speed = 1.0 + ((r * 11 + c * 7) % 100) / 100 * 0.9;
-        const amp   = 0.09 + ((r * 5 + c * 19) % 100) / 100 * 0.07;
+        const amp   = 0.03 + ((r * 5 + c * 19) % 100) / 100 * 0.025;
         applyWobble(obj, { phase, speed, amp });
       } catch(e) { console.warn('wobble palm error:', e); }
     }
@@ -1535,7 +1535,7 @@ function buildMap(g, customCellData) {
     try {
       const dp = (r*1.41+c*2.73+Math.random()) % (Math.PI*2);
       const ds = 1.0 + Math.random()*1.0;
-      const da = 0.07 + Math.random()*0.06;
+      const da = 0.025 + Math.random()*0.02;
       applyWobble(det, { phase:dp, speed:ds, amp:da });
     } catch(e) { console.warn('wobble deco error:', e); }
   }
@@ -2976,10 +2976,8 @@ function makeWobbleMaterial(origMat, phase, speed, amp) {
     uniform float uAmp;
     uniform float uYMin;
     uniform float uYMax;
-    varying vec3 vNormal;
     varying vec2 vUv;
     void main() {
-      vNormal = normalMatrix * normal;
       vUv = uv;
       vec3 pos = position;
       // Маска: 0 у основания → 1 у кроны
@@ -2997,15 +2995,12 @@ function makeWobbleMaterial(origMat, phase, speed, amp) {
     uniform vec3 uColor;
     uniform sampler2D uMap;
     uniform int uHasMap;
-    varying vec3 vNormal;
     varying vec2 vUv;
     void main() {
       vec3 col = uColor;
       if (uHasMap == 1) col *= texture2D(uMap, vUv).rgb;
-      // Освещение: яркий ambient + diffuse чтобы деревья не были тёмными
-      vec3 light = normalize(vec3(-0.4, 1.0, 0.6));
-      float diff = max(dot(normalize(vNormal), light), 0.0) * 0.65 + 0.55;
-      gl_FragColor = vec4(col * diff, 1.0);
+      // Без затемнения — полный цвет как у MeshBasicMaterial
+      gl_FragColor = vec4(col, 1.0);
     }
   `;
   const uniforms = {
@@ -4040,7 +4035,7 @@ function startGame(mapGrid, customCellData, freeObjsData) {
       if (_palmTreeKeys.includes(fo.modelKey)) {
         const _fp = Math.random() * Math.PI * 2;
         const _fs = 1.0 + Math.random() * 1.2;  // было 0.5+0.6
-        const _fa = 0.07 + Math.random() * 0.08; // было 0.05+0.05
+        const _fa = 0.025 + Math.random() * 0.02; // было 0.05+0.05
         applyWobble(obj, { phase: _fp, speed: _fs, amp: _fa });
       }
     });
