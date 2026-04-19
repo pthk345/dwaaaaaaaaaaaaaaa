@@ -28,12 +28,7 @@ font-family:‘Nunito’,‘SF Pro Rounded’,system-ui,sans-serif;
 color:#fff;
 touch-action:none;
 }
-#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;
-  /* ═══ ПОСТОБРАБОТКА — меняй значения здесь ═══════════════════════════════
-     contrast: 1.00=норма  1.05=+5%  1.10=+10%  (текущее: +5%)
-     saturate: 1.00=норма  1.06=+6%  1.12=+12%  (текущее: +6%)  */
-  filter: contrast(1.05) saturate(1.06);
-}
+#canvas{display:block;width:100vw;height:100vh;position:fixed;top:0;left:0;z-index:0;filter:saturate(0.980);}
 
 /* ── SCREENS ── */
 .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
@@ -1069,7 +1064,6 @@ function initThree() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  /* ─ Экспозиция рендера: 0.85=чуть темнее нормы, 1.0=норма, 1.15=ярче ─ */
   renderer.toneMappingExposure = 0.85;
   renderer.setClearColor(0x6baed6, 1); // fallback пока небо не загружено
   
@@ -1080,7 +1074,7 @@ function initThree() {
   // Атмосферная дымка — FogExp2 мягко растворяет дальние объекты
   // density 0.018: ближние тайлы чёткие, горизонт тает
   // Цвет совпадает с небом → плавный переход
-  scene.fog = new THREE.FogExp2(0xb8d4e8, 0.026);
+  scene.fog = new THREE.FogExp2(0xe1c9bb, 0.026);
   window._gameFog = scene.fog;
 
   // ══ НЕБО ══════════════════════════════════
@@ -1916,6 +1910,7 @@ const ED_PALETTE = [
 
 // Per-cell custom model + rotation overrides for editor
 let edCellData = {}; // key "r,c" -> { modelKey, rot, tileType }
+let _editingMapIdx = -1; // -1 = новая карта, >= 0 = редактируем существующую
 
 function edKey(r,c){ return r+','+c; }
 
@@ -2037,6 +2032,7 @@ function openEditor() {
   editorActive = true;
   edCellData = {};
   editorGrid = Array.from({length:GRID_H}, ()=>Array(GRID_W).fill(TILE_GRASS));
+  _editingMapIdx = -1; // новая карта
   document.getElementById('editor-screen').style.display='flex';
   document.getElementById('main-menu').classList.add('hidden');
   buildEditorPalette();
@@ -2121,7 +2117,7 @@ function closeEditor() {
   // ── Восстанавливаем небо/океан при выходе из редактора ──
   if (window._skyTex) {
     scene.background = window._skyTex;
-    scene.fog = window._gameFog || new THREE.FogExp2(0xb8d4e8, 0.026);
+    scene.fog = window._gameFog || new THREE.FogExp2(0xe1c9bb, 0.026);
   } else {
     scene.background = new THREE.Color(0x87ceeb);
   }
@@ -2211,12 +2207,8 @@ function saveEditorMap() {
     return;
   }
 
-  const name = prompt('Enter map name:', 'My Map ' + (Date.now()%1000));
-  if(!name) return;
-
   const saved = JSON.parse(localStorage.getItem('td_saved_maps') || '[]');
-  saved.push({
-    name,
+  const mapData = {
     grid: editorGrid.map(r=>[...r]),
     cellData: {...edCellData},
     freeObjs: edFreeObjects.map(fo => ({
@@ -2226,9 +2218,24 @@ function saveEditorMap() {
       scale: { x: fo.mesh.scale.x, y: fo.mesh.scale.y, z: fo.mesh.scale.z },
     })),
     date: new Date().toLocaleDateString()
-  });
-  localStorage.setItem('td_saved_maps', JSON.stringify(saved));
-  document.getElementById('ed-info').textContent = `✅ Map "${name}" saved! (${saved.length} maps total)`;
+  };
+
+  if (_editingMapIdx >= 0 && saved[_editingMapIdx]) {
+    // Перезаписываем существующую карту, имя не меняем
+    mapData.name = saved[_editingMapIdx].name;
+    saved[_editingMapIdx] = mapData;
+    localStorage.setItem('td_saved_maps', JSON.stringify(saved));
+    document.getElementById('ed-info').textContent = `✅ Карта «${mapData.name}» обновлена!`;
+  } else {
+    // Новая карта — просим имя
+    const name = prompt('Название карты:', 'My Map ' + (Date.now()%1000));
+    if (!name) return;
+    mapData.name = name;
+    saved.push(mapData);
+    _editingMapIdx = saved.length - 1; // теперь редактируем эту карту
+    localStorage.setItem('td_saved_maps', JSON.stringify(saved));
+    document.getElementById('ed-info').textContent = `✅ Карта «${name}» сохранена! (всего: ${saved.length})`;
+  }
 }
 
 // ============================================================
@@ -3081,7 +3088,7 @@ function buildReflection() {
         nm.transparent  = false;
         nm.opacity      = 1.0;
         nm.depthWrite   = true;
-        nm.side         = THREE.FrontSide; // FrontSide верно: grp.scale(1,-1,1) уже зеркалит геометрию
+        nm.side         = THREE.BackSide;
         // ── STENCIL: каждый пиксель отражения пишет 1 в stencil-буфер ──
         nm.stencilWrite = true;
         nm.stencilFunc  = THREE.AlwaysStencilFunc;
@@ -4325,6 +4332,114 @@ function setupEvents() {
 // ============================================================
 // MY MAPS
 // ============================================================
+function openEditorWithMap(map, idx) {
+  // Закрываем модалку карт
+  document.getElementById('my-maps-modal').classList.add('hidden');
+  document.getElementById('main-menu').classList.add('hidden');
+
+  // Стандартный вход в редактор
+  editorActive = true;
+  _editingMapIdx = idx; // запоминаем индекс для перезаписи при сохранении
+  document.getElementById('editor-screen').style.display = 'flex';
+  buildEditorPalette();
+  if (!scene) { initThree(); }
+
+  if (window._lilypadMeshes) {
+    window._lilypadMeshes.forEach(m => { if (m.parent) m.parent.remove(m); });
+  }
+  if (_reflGroup) _reflGroup.visible = false;
+  if (!window._editorFloor) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const cx2 = cv.getContext('2d');
+    const c1 = '#2c2c2e', c2 = '#232325';
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      cx2.fillStyle = (x + y) % 2 === 0 ? c1 : c2;
+      cx2.fillRect(x*16, y*16, 16, 16);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(40, 40);
+    const mat2 = new THREE.MeshBasicMaterial({ map: tex });
+    const mesh2 = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), mat2);
+    mesh2.rotation.x = -Math.PI / 2;
+    mesh2.position.set((GRID_W-1)/2*TILE_SIZE, -0.01, (GRID_H-1)/2*TILE_SIZE);
+    mesh2.userData.persistent = true;
+    scene.add(mesh2);
+    window._editorFloor = mesh2;
+  }
+
+  // Загружаем данные карты в редактор
+  editorGrid = map.grid.map(r => [...r]);
+  edCellData  = map.cellData ? { ...map.cellData } : {};
+
+  // Сначала строим пустую сцену редактора
+  clearScene();
+  scene.background = new THREE.Color(0x39393b);
+  scene.fog = null;
+  renderer.setClearColor(0x39393b, 1);
+  if (window._editorFloor) window._editorFloor.visible = true;
+  if (window._waterMesh)   window._waterMesh.visible   = false;
+  if (window._foamMesh)    window._foamMesh.visible    = false;
+
+  // Сетка
+  const lineMat2 = new THREE.LineBasicMaterial({color:0x555555,transparent:true,opacity:0.8});
+  for(let i=0;i<=GRID_W;i++){
+    const pts=[new THREE.Vector3(i*TILE_SIZE-0.5,0.02,-0.5),
+               new THREE.Vector3(i*TILE_SIZE-0.5,0.02,GRID_H*TILE_SIZE-0.5)];
+    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lineMat2);
+    addToScene(line); tileObjects.push(line);
+  }
+  for(let i=0;i<=GRID_H;i++){
+    const pts=[new THREE.Vector3(-0.5,0.02,i*TILE_SIZE-0.5),
+               new THREE.Vector3(GRID_W*TILE_SIZE-0.5,0.02,i*TILE_SIZE-0.5)];
+    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lineMat2);
+    addToScene(line); tileObjects.push(line);
+  }
+
+  // Расставляем тайлы из сохранённой карты
+  for(let r=0;r<GRID_H;r++) for(let c=0;c<GRID_W;c++) {
+    const tt = editorGrid[r][c];
+    if(tt === TILE_GRASS) continue;
+    const data = edCellData[edKey(r,c)];
+    if(!data) continue;
+    const obj = assets.clone(data.modelKey);
+    if(!obj) continue;
+    scaleTo(obj, TILE_SIZE);
+    obj.rotation.y = data.rot || 0;
+    obj.position.set(c*TILE_SIZE, 0, r*TILE_SIZE);
+    obj.traverse(m=>{ if(m.isMesh){ m.castShadow=true; m.receiveShadow=true; }});
+    obj.userData = { type:'tile', row:r, col:c, tileType:tt };
+    addToScene(obj); tileObjects.push(obj); tileMeshGrid[r][c]=obj;
+  }
+
+  // Загружаем свободно размещённые объекты
+  edFreeObjects.forEach(fo => scene.remove(fo.mesh));
+  edFreeObjects = [];
+  edSelectedFreeObj = null;
+  if (map.freeObjs && map.freeObjs.length > 0) {
+    map.freeObjs.forEach(fo => {
+      const obj2 = assets.clone(fo.modelKey);
+      if (!obj2) return;
+      if (typeof fo.scale === 'number') obj2.scale.set(fo.scale, fo.scale, fo.scale);
+      else if (fo.scale && typeof fo.scale === 'object') obj2.scale.set(fo.scale.x, fo.scale.y, fo.scale.z);
+      obj2.position.set(fo.pos.x, fo.pos.y, fo.pos.z);
+      if (fo.rot) obj2.rotation.set(fo.rot.x, fo.rot.y, fo.rot.z);
+      obj2.traverse(m=>{ if(m.isMesh){ m.castShadow=true; m.receiveShadow=true; }});
+      obj2.userData = { freeObj:true, modelKey:fo.modelKey };
+      scene.add(obj2); tileObjects.push(obj2);
+      edFreeObjects.push({ mesh:obj2, modelKey:fo.modelKey });
+    });
+  }
+
+  camTarget.set((GRID_W-1)/2*TILE_SIZE, 0, (GRID_H-1)/2*TILE_SIZE);
+  camDist = 26; camAngle = Math.PI/4; camElevation = 1.1;
+  updateCamera();
+
+  gameState = 'editor';
+  document.getElementById('ed-info').textContent = `✏️ Редактирование: «${map.name}»`;
+}
+
 function openMyMaps() {
   const modal = document.getElementById('my-maps-modal');
   const list = document.getElementById('my-maps-list');
@@ -4343,6 +4458,7 @@ function openMyMaps() {
           <div style="font-size:0.75rem;color:#556;">${map.date}</div>
         </div>
         <button style="padding:5px 12px;border-radius:4px;border:1.5px solid #f5a623;background:#f5a623;color:#000;font-size:0.8rem;font-weight:700;cursor:pointer;" data-idx="${i}" class="mm-play">▶ Play</button>
+        <button style="padding:5px 12px;border-radius:4px;border:1.5px solid #4a9eff;background:transparent;color:#4a9eff;font-size:0.8rem;font-weight:700;cursor:pointer;" data-idx="${i}" class="mm-edit">✏️</button>
         <button style="padding:5px 12px;border-radius:4px;border:1.5px solid #e74c3c;background:transparent;color:#e74c3c;font-size:0.8rem;font-weight:700;cursor:pointer;" data-idx="${i}" class="mm-del">🗑</button>
       `;
       list.appendChild(row);
@@ -4353,6 +4469,13 @@ function openMyMaps() {
         const map = saved[idx];
         modal.classList.add('hidden');
         startGame(map.grid, map.cellData || null, map.freeObjs || []);
+      });
+    });
+    list.querySelectorAll('.mm-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx);
+        const map = saved[idx];
+        openEditorWithMap(map, idx);
       });
     });
     list.querySelectorAll('.mm-del').forEach(btn => {
