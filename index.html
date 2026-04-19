@@ -1285,12 +1285,12 @@ function initThree() {
 
   const waterUniforms = {
     uTime:          { value: 0 },
-    uScale:         { value: 0.22 },   // мелкий паттерн
+    uScale:         { value: 0.55 },   // мельче ячейки → края встречаются чаще
     uCellSpeed:     { value: 0.18 },
     uFlowX:         { value: 0.012 },
     uFlowZ:         { value: -0.05 },
-    uEdgeThreshold: { value: 0.30 },   // очень толстые края
-    uEdgeSoftness:  { value: 0.12 },   // широкая мягкая белая полоса
+    uEdgeThreshold: { value: 0.06 },   // нормальный диапазон edge-значений Вороного
+    uEdgeSoftness:  { value: 0.04 },   // достаточно для чёткой белой линии
     uDeepColor:     { value: new THREE.Color(0xb8cad9) },   // #b8cad9 — ненасыщенный
     uMidColor:      { value: new THREE.Color(0xc8d8e6) },   // чуть светлее
     uHighlight:     { value: new THREE.Color(0xffffff) },   // белый для краёв
